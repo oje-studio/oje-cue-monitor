@@ -1,0 +1,17 @@
+timecode,name,description,operator_note,color,group,operators
+,— ACT 1 —,,,,Act 1,
+00:00:30:00,House Lights Down,Fade to 0% over 10s,,blue,Act 1,Lighting:Fade FOH to 0%|SM:Confirm house clear
+00:01:00:00,Intro Video,Roll playback on server,,blue,Act 1,Video:Start timeline|Audio:Check levels
+00:02:30:00,Artist Entrance,Spot 1 on SR entrance,,green,Act 1,Followspot 1:Pick up SR entrance|Haze:Verify output
+00:05:00:00,Song 1 — Verse,General wash pink,,,Act 1,Lighting:Go wash pink
+00:06:30:00,Song 1 — Chorus,Add moving heads,,yellow,Act 1,Lighting:Add movers|SFX:STROBES ON
+00:08:00:00,Song 1 — End,Blackout snap,,red,Act 1,Lighting:Snap blackout
+,— TRANSITION —,,,,Transition,
+00:08:30:00,Stage Transition,Stage reset 3 min,,,,Crew:Set pieces for Act 2|SM:Standby Act 2
+00:11:00:00,Song 2 — Start,Blue wash + follow spots,,blue,Act 2,Lighting:Blue wash|Followspot 1:CS pickup|Followspot 2:CS pickup
+,— ACT 2 —,,,,Act 2,
+00:14:30:00,Song 2 — Bridge,Reduce to single spot,,,Act 2,Followspot 1:Tight spot CS
+00:16:00:00,Song 2 — End,Fade to black 5s,,red,Act 2,Lighting:5s fade to black
+00:17:00:00,Encore Walk-on,Full stage warm,,orange,Encore,Lighting:Full warm|Audio:Check wireless
+00:19:00:00,Encore — Chorus,Maximum rig — all fixtures,,yellow,Encore,Lighting:All fixtures GO|SFX:PYRO ARM|Pyro:STANDBY
+00:21:00:00,Show End,House lights up 30s fade,,,Encore,Lighting:House up 30s|SM:Confirm clear|Audio:Playback exit music

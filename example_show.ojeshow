@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "settings": {
+    "audio_device_name": "",
+    "audio_channel": 0,
+    "logo_path": "",
+    "operator_names": ["Lighting", "Audio", "Stage Manager"],
+    "perf_cue_name_size": 56,
+    "perf_cue_desc_size": 26,
+    "perf_operator_size": 20,
+    "perf_operator_name_size": 12,
+    "perf_next_name_size": 30,
+    "perf_next_desc_size": 16,
+    "perf_countdown_size": 36,
+    "countdown_enabled": true
+  },
+  "cues": [
+    {
+      "timecode": "",
+      "name": "— ACT 1 —",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "00:00:30:00",
+      "name": "House Open",
+      "description": "Doors open, pre-show state",
+      "color": "blue",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Preset state ON",
+        "Audio": "Pre-show music start",
+        "Stage Manager": "Confirm FOH ready"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "00:05:00:00",
+      "name": "Welcome",
+      "description": "Host enters stage right",
+      "color": "green",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Fade up CS spot",
+        "Audio": "Music fade out, mic HOT",
+        "Stage Manager": "Cue host GO"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "00:08:15:00",
+      "name": "Video Roll",
+      "description": "Opening video package (2:30)",
+      "color": "purple",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Blackout",
+        "Audio": "Video feed LIVE",
+        "Stage Manager": "Standby next presenter"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "00:10:45:00",
+      "name": "Keynote Start",
+      "description": "Main presentation begins",
+      "color": "orange",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Full stage wash + key",
+        "Audio": "Lapel mic live",
+        "Stage Manager": "Slides GO on cue"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "",
+      "name": "— INTERVAL —",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "00:45:00:00",
+      "name": "Interval",
+      "description": "15 min break",
+      "color": "grey",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "House lights 70%",
+        "Audio": "Interval music playlist",
+        "Stage Manager": "Reset stage for Act 2"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "",
+      "name": "— ACT 2 —",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "01:00:00:00",
+      "name": "Act 2 Start",
+      "description": "Panel discussion",
+      "color": "teal",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Panel wash state",
+        "Audio": "4x lapel mics hot",
+        "Stage Manager": "Confirm all panelists seated"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "01:30:00:00",
+      "name": "Finale",
+      "description": "Closing remarks and thank you",
+      "color": "red",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Finale state - full colour",
+        "Audio": "Walk-out music standby",
+        "Stage Manager": "Confetti standby"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "01:32:00:00",
+      "name": "Show End",
+      "description": "House lights up, exit music",
+      "color": "white",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "House lights FULL",
+        "Audio": "Exit music GO",
+        "Stage Manager": "All clear"
+      },
+      "is_divider": false
+    }
+  ]
+}
