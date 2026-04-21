@@ -23,7 +23,7 @@ _console_handler.setFormatter(logging.Formatter(
 logging.basicConfig(level=logging.DEBUG, handlers=[_file_handler, _console_handler])
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "0.96beta"
+VERSION   = "0.97beta"
 COPYRIGHT = "© 2026 ØJE Studio"
 
 

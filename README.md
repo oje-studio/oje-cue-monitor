@@ -2,7 +2,7 @@
 
 macOS live show operator tool — LTC/SMPTE timecode reader + cue list manager with performance mode.
 
-![Version](https://img.shields.io/badge/version-0.96beta-blue)
+![Version](https://img.shields.io/badge/version-0.97beta-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.9+-green)
 

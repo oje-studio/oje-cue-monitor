@@ -33,6 +33,8 @@ class CueEngine:
     def __init__(self, fps: float = 25.0):
         self.fps = fps
         self.cues: List[Cue] = []
+        self._active_index: int = -1
+        self._prev_frames: int = -1
 
     # ── timecode math ─────────────────────────────────────────────────────────
 
@@ -87,10 +89,11 @@ class CueEngine:
                 is_divider=is_divider,
             ))
 
-        self._assign_sort_order(cues)
         for i, c in enumerate(cues):
             c.index = i + 1
         self.cues = cues
+        self._active_index = -1
+        self._prev_frames = -1
 
     def to_show_cues(self) -> List[ShowCue]:
         result = []
@@ -105,21 +108,6 @@ class CueEngine:
                 is_divider=cue.is_divider,
             ))
         return result
-
-    # ── sort ──────────────────────────────────────────────────────────────────
-
-    def _assign_sort_order(self, cues: List[Cue]):
-        pending_dividers: List[Cue] = []
-        for cue in cues:
-            if cue.is_divider:
-                pending_dividers.append(cue)
-            else:
-                for d in pending_dividers:
-                    d.frames = cue.frames - 1 if cue.frames > 0 else -1
-                pending_dividers.clear()
-        for d in pending_dividers:
-            d.frames = 99999999
-        cues.sort(key=lambda c: (c.frames, 0 if c.is_divider else 1))
 
     # ── mutations ─────────────────────────────────────────────────────────────
 
@@ -138,9 +126,6 @@ class CueEngine:
                 try:
                     h, m, s, f = self.parse_timecode(value)
                     cue.frames = self.tc_to_frames(h, m, s, f)
-                    self._assign_sort_order(self.cues)
-                    for i, c in enumerate(self.cues):
-                        c.index = i + 1
                 except CueParseError:
                     pass
 
@@ -198,29 +183,56 @@ class CueEngine:
                 return c.name
         return ""
 
+    def set_fps(self, fps: float):
+        if fps == self.fps:
+            return
+        self.fps = fps
+        for cue in self.cues:
+            if cue.is_divider or not cue.timecode.strip():
+                continue
+            try:
+                h, m, s, f = self.parse_timecode(cue.timecode)
+                cue.frames = self.tc_to_frames(h, m, s, f)
+            except CueParseError:
+                pass
+
+    def reset_active(self):
+        self._active_index = -1
+        self._prev_frames = -1
+
     # ── queries ───────────────────────────────────────────────────────────────
 
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
-        result = None
-        for cue in self.cues:
-            if cue.is_divider:
-                continue
-            if cue.frames <= tc_frames:
-                result = cue
-            else:
-                break
-        return result
+        prev = self._prev_frames
+        self._prev_frames = tc_frames
+        if prev >= 0 and tc_frames != prev:
+            lo, hi = min(prev, tc_frames), max(prev, tc_frames)
+            for i, cue in enumerate(self.cues):
+                if cue.is_divider or not cue.has_timecode:
+                    continue
+                if i == self._active_index:
+                    continue
+                if lo <= cue.frames <= hi:
+                    print(f"[CUE ENGINE] TRIGGER cue {i} '{cue.name}' "
+                          f"cue_frames={cue.frames} range=[{lo},{hi}] "
+                          f"active was={self._active_index}")
+                    self._active_index = i
+                    break
+        if 0 <= self._active_index < len(self.cues):
+            return self.cues[self._active_index]
+        return None
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
-        for cue in self.cues:
-            if cue.is_divider:
+        start = self._active_index + 1 if self._active_index >= 0 else 0
+        for i in range(start, len(self.cues)):
+            cue = self.cues[i]
+            if cue.is_divider or not cue.has_timecode:
                 continue
-            if cue.frames > tc_frames:
-                return cue
+            return cue
         return None
 
     def get_countdown(self, tc_frames: int) -> Optional[float]:
         nxt = self.get_next_cue(tc_frames)
         if nxt is None:
             return None
-        return (nxt.frames - tc_frames) / self.fps
+        return abs(nxt.frames - tc_frames) / self.fps

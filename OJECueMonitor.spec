@@ -81,12 +81,12 @@ app = BUNDLE(
     name="ØJE CUE MONITOR.app",
     # icon="icon.icns",  # uncomment to use a custom icon
     bundle_identifier="studio.oje.cuemonitor",
-    version="0.96.0",
+    version="0.97.0",
     info_plist={
         "CFBundleDisplayName":          "ØJE CUE MONITOR",
         "CFBundleName":                 "ØJE CUE MONITOR",
-        "CFBundleShortVersionString":   "0.96",
-        "CFBundleVersion":              "0.96.0",
+        "CFBundleShortVersionString":   "0.97",
+        "CFBundleVersion":              "0.97.0",
         "NSMicrophoneUsageDescription": "ØJE CUE MONITOR needs microphone access to receive LTC timecode from the audio input.",
         "NSHighResolutionCapable":      True,
         "LSUIElement":                  False,

@@ -29,7 +29,7 @@ from web_remote import WebRemoteServer
 logger = logging.getLogger(__name__)
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "v0.96β"
+VERSION   = "v0.97β"
 COPYRIGHT = "© 2026 ØJE Studio"
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -701,8 +701,10 @@ class MainWindow(QMainWindow):
         self._table.set_edit_mode(True)
 
     def _on_cue_edit(self, row: int, field: str, value: str):
+        print(f"[MAIN] _on_cue_edit: row={row}, field={field}, value={value}")
         self._engine.update_cue_field(row, field, value)
         if field == "timecode":
+            print(f"[MAIN] after update, cue tc={self._engine.cues[row].timecode if row < len(self._engine.cues) else 'OUT OF RANGE'}")
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
         else:
@@ -774,6 +776,7 @@ class MainWindow(QMainWindow):
                     break
         channel_index = self._show_settings.audio_channel
 
+        self._engine.reset_active()
         logger.info("Starting decoder  device=%s  channel=%d", device_index, channel_index)
         self._decoder = LTCDecoder(device_index=device_index, channel_index=channel_index)
         self._decoder.start()
@@ -814,7 +817,7 @@ class MainWindow(QMainWindow):
             _, h, m, s, f, fps = msg
             self._last_tc        = (h, m, s, f)
             self._last_fps       = fps
-            self._engine.fps     = fps
+            self._engine.set_fps(fps)
             self._current_frames = self._engine.tc_to_frames(h, m, s, f)
             tc_str = f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
             self._tc_label.setText(tc_str)

@@ -138,6 +138,8 @@ class TimecodePopup(QFrame):
             "TimecodePopup { background: #1c1c1c; border: 2px solid #4a90d9; border-radius: 6px; }"
         )
         self.setFixedSize(220, 70)
+        self._applied = False
+        self._cancelled = False
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
@@ -149,7 +151,7 @@ class TimecodePopup(QFrame):
         lay.addWidget(lbl)
 
         self._edit = QLineEdit()
-        self._edit.setInputMask("99:99:99:99;0")
+        self._edit.setInputMask("00:00:00:00;0")
         self._edit.setFont(QFont("Menlo", 16))
         self._edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._edit.setStyleSheet(
@@ -158,7 +160,7 @@ class TimecodePopup(QFrame):
         )
         self._edit.setText(current_tc if current_tc else "00:00:00:00")
         self._edit.selectAll()
-        self._edit.returnPressed.connect(self._confirm)
+        self._edit.returnPressed.connect(self._on_return)
         lay.addWidget(self._edit)
 
     def showEvent(self, event):
@@ -168,20 +170,36 @@ class TimecodePopup(QFrame):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
+            self._cancelled = True
             self.close()
         else:
             super().keyPressEvent(event)
 
-    def _confirm(self):
-        val = self._edit.text().replace(" ", "0")
+    def hideEvent(self, event):
+        if not self._cancelled:
+            self._try_apply()
+        super().hideEvent(event)
+
+    def _on_return(self):
+        print(f"[TC POPUP] _on_return called")
+        self._try_apply()
+        self.close()
+
+    def _try_apply(self):
+        if self._applied:
+            return
+        self._applied = True
+        val = self._edit.text().replace(" ", "")
         parts = val.split(":")
-        if len(parts) == 4 and all(p.isdigit() for p in parts):
+        if len(parts) != 4:
+            return
+        parts = [p if p else "0" for p in parts]
+        if all(p.isdigit() for p in parts):
             h = min(int(parts[0]), 23)
             m = min(int(parts[1]), 59)
             s = min(int(parts[2]), 59)
             f = min(int(parts[3]), 29)
             self.accepted.emit(f"{h:02d}:{m:02d}:{s:02d}:{f:02d}")
-        self.close()
 
 
 # ── Timecode paint delegate (visual only, no editing) ─────────────────────────
@@ -365,6 +383,7 @@ class CueTable(QTableWidget):
         popup.show()
 
     def _apply_timecode(self, row: int, tc: str):
+        print(f"[TC TABLE] _apply_timecode: row={row}, tc={tc}")
         self.cue_data_changed.emit(row, "timecode", tc)
 
     # ── highlight ─────────────────────────────────────────────────────────────
@@ -402,7 +421,7 @@ class CueTable(QTableWidget):
                 continue
 
             is_current = current_cue is not None and cue.index == current_cue.index
-            is_past    = cue.frames < current_frames and not is_current
+            is_past    = current_cue is not None and row < (current_cue.index - 1) and not is_current
             is_dup     = row in self._duplicate_rows
             is_dup_hl  = row in self._highlighted_siblings
             custom_bg  = _named_bg(cue.color) if cue.color else None
