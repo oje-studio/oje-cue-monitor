@@ -23,6 +23,8 @@ from show_file import ShowFile, ShowSettings
 from ui.cue_table import CueTable, CueEditToolbar, OperatorEditPanel
 from ui.performance_view import PerformanceView
 from ui.settings_dialog import SettingsDialog
+from ui.remote_panel import RemotePanel
+from web_remote import WebRemoteServer
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +198,7 @@ class MainWindow(QMainWindow):
         self._logo_pixmap: Optional[QPixmap] = None
         self._log_file        = None
         self._audio_devices: list = []
+        self._web_remote: Optional[WebRemoteServer] = None
 
         self._init_log()
         self._scan_audio_devices()
@@ -376,6 +379,13 @@ class MainWindow(QMainWindow):
         self._btn_settings.setFixedHeight(30)
         self._btn_settings.clicked.connect(self._open_settings)
         fl.addWidget(self._btn_settings)
+
+        self._btn_remote = QPushButton("Remote")
+        self._btn_remote.setFixedHeight(30)
+        self._btn_remote.setToolTip("Start/stop web remote for other devices")
+        self._btn_remote.setCheckable(True)
+        self._btn_remote.clicked.connect(self._toggle_remote)
+        fl.addWidget(self._btn_remote)
 
         fl.addStretch()
 
@@ -609,6 +619,44 @@ class MainWindow(QMainWindow):
         # Operator edit panel
         self._op_panel.set_operators(settings.operator_names)
 
+    # ── Web Remote ─────────────────────────────────────────────────────────────
+
+    def _toggle_remote(self, checked: bool):
+        if checked:
+            self._start_remote()
+        else:
+            self._stop_remote()
+
+    def _start_remote(self):
+        if self._web_remote and self._web_remote._running:
+            self._show_remote_panel()
+            return
+        self._web_remote = WebRemoteServer(port=8080)
+        self._web_remote.set_operators(self._show_settings.operator_names)
+        self._web_remote.start()
+        self._btn_remote.setText("Remote ON")
+        self._btn_remote.setStyleSheet(
+            f"QPushButton {{ background: {QColor(48,100,160).name()}; "
+            f"color: white; border-radius: 4px; }}"
+        )
+        logger.info("Web remote started: %s", self._web_remote.base_url)
+        self._show_remote_panel()
+
+    def _stop_remote(self):
+        if self._web_remote:
+            self._web_remote.stop()
+            self._web_remote = None
+        self._btn_remote.setText("Remote")
+        self._btn_remote.setStyleSheet("")
+        logger.info("Web remote stopped")
+
+    def _show_remote_panel(self):
+        port = self._web_remote.port if self._web_remote else 8080
+        dlg = RemotePanel(port, self._show_settings.operator_names, self)
+        dlg.exec()
+
+    # ── Logo ─────────────────────────────────────────────────────────────────
+
     def _apply_logo(self, path: str):
         pix = QPixmap(path)
         if pix.isNull():
@@ -813,6 +861,11 @@ class MainWindow(QMainWindow):
         nxt_group = self._engine.get_group_for_cue(nxt) if nxt else ""
         self._perf_view.update_display(current, nxt, countdown, tc_str, cur_group, nxt_group)
 
+        if self._web_remote and self._web_remote._running:
+            self._web_remote.broadcast_state(
+                current, nxt, countdown, tc_str, cur_group, nxt_group
+            )
+
     def _refresh_signal_dot(self):
         color = ACCENT_GREEN.name() if self._signal_ok else ACCENT_RED.name()
         self._signal_dot.setStyleSheet(f"color: {color}; font-size: 16px;")
@@ -980,6 +1033,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._stop_decoder()
+        if self._web_remote:
+            self._web_remote.stop()
         self._qsettings.setValue("geometry", self.saveGeometry())
         if self._log_file:
             self._log("--- session ended ---")
