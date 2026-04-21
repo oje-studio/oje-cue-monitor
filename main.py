@@ -1,26 +1,48 @@
 import sys
 import logging
 import os
+import platform
 from datetime import datetime
 
-# Console: INFO+  |  log file: DEBUG+ (written by main_window, but also capture here)
-_log_dir  = os.path.expanduser("~/Library/Logs/OJECueMonitor")
-os.makedirs(_log_dir, exist_ok=True)
-_log_path = os.path.join(_log_dir, datetime.now().strftime("session_%Y-%m-%d.log"))
 
-_file_handler = logging.FileHandler(_log_path, encoding="utf-8")
-_file_handler.setLevel(logging.DEBUG)
-_file_handler.setFormatter(logging.Formatter(
-    "%(asctime)s  %(levelname)-8s  %(name)s: %(message)s"
-))
+def _default_log_dir() -> str:
+    """Platform-appropriate log directory."""
+    system = platform.system()
+    if system == "Darwin":
+        return os.path.expanduser("~/Library/Logs/OJECueMonitor")
+    if system == "Windows":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "OJECueMonitor", "Logs")
+    # Linux / other
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    return os.path.join(base, "OJECueMonitor", "logs")
 
-_console_handler = logging.StreamHandler()
-_console_handler.setLevel(logging.INFO)
-_console_handler.setFormatter(logging.Formatter(
-    "%(asctime)s  %(levelname)s  %(name)s: %(message)s"
-))
 
-logging.basicConfig(level=logging.DEBUG, handlers=[_file_handler, _console_handler])
+_log_dir = _default_log_dir()
+try:
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_path = os.path.join(_log_dir, datetime.now().strftime("session_%Y-%m-%d.log"))
+    _file_handler = logging.FileHandler(_log_path, encoding="utf-8")
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s  %(levelname)-8s  %(name)s: %(message)s"
+    ))
+    _handlers = [_file_handler]
+except OSError:
+    _handlers = []
+
+# In a PyInstaller --windowed / --noconsole build, sys.stdout and sys.stderr
+# are None. Attaching a StreamHandler to them causes AttributeError on the
+# first log call. Only add the console handler when a real stream exists.
+if sys.stderr is not None:
+    _console_handler = logging.StreamHandler()
+    _console_handler.setLevel(logging.INFO)
+    _console_handler.setFormatter(logging.Formatter(
+        "%(asctime)s  %(levelname)s  %(name)s: %(message)s"
+    ))
+    _handlers.append(_console_handler)
+
+logging.basicConfig(level=logging.DEBUG, handlers=_handlers)
 
 APP_NAME  = "ØJE CUE MONITOR"
 VERSION   = "0.97beta"

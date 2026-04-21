@@ -26,6 +26,17 @@ a = Analysis(
         "numpy.core._multiarray_umath",
         "ctypes",
         "ctypes.util",
+        # Web remote server (aiohttp loads these lazily)
+        "aiohttp",
+        "aiohttp.web",
+        "aiohttp.web_ws",
+        "aiohttp.web_runner",
+        # QR code generation for web remote (qrcode[pil] uses PIL backend)
+        "qrcode",
+        "qrcode.image.pil",
+        "PIL",
+        "PIL.Image",
+        "PIL.PngImagePlugin",
     ],
     hookspath=[],
     hooksconfig={},

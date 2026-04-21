@@ -21,7 +21,8 @@ echo ▶  Python: OK
 
 :: ── Install pip packages ────────────────────────────────────────────────────
 echo ▶  Installing Python packages...
-pip install PyQt6 pyaudio numpy qrcode aiohttp
+:: qrcode[pil] pulls in Pillow which web_remote.py needs to render PNG QR codes.
+pip install PyQt6 pyaudio numpy "qrcode[pil]" aiohttp Pillow
 
 if errorlevel 1 (
     echo.

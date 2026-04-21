@@ -24,8 +24,19 @@ if not exist "libs\win64\libltc.dll" (
 )
 
 :: ── Install dependencies ────────────────────────────────────────────────────
+:: qrcode[pil] pulls in Pillow — required for PNG QR rendering in web_remote.py.
+:: Errors are left visible so missing wheels (e.g. pyaudio) are obvious.
 echo ▶  Installing dependencies...
-pip install pyinstaller pyqt6 pyaudio numpy qrcode aiohttp >nul 2>&1
+pip install pyinstaller pyqt6 pyaudio numpy "qrcode[pil]" aiohttp Pillow
+if errorlevel 1 (
+    echo.
+    echo ERROR: Dependency install failed. If pyaudio is the problem, try:
+    echo   pip install pipwin
+    echo   pipwin install pyaudio
+    echo.
+    pause
+    exit /b 1
+)
 
 :: ── Clean previous build ────────────────────────────────────────────────────
 echo ▶  Cleaning previous build...

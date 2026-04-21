@@ -213,9 +213,6 @@ class CueEngine:
                 if i == self._active_index:
                     continue
                 if lo <= cue.frames <= hi:
-                    print(f"[CUE ENGINE] TRIGGER cue {i} '{cue.name}' "
-                          f"cue_frames={cue.frames} range=[{lo},{hi}] "
-                          f"active was={self._active_index}")
                     self._active_index = i
                     break
         if 0 <= self._active_index < len(self.cues):

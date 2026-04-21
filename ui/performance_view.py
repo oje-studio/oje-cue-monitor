@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QPixmap
 
 from show_file import ShowSettings
+from ui.fonts import mono_font, sans_font
 
 APP_NAME  = "ØJE CUE MONITOR"
 COPYRIGHT = "© 2026 ØJE Studio"
@@ -40,8 +41,7 @@ class PerformanceView(QWidget):
         tb_lay.setContentsMargins(20, 0, 20, 0)
 
         self._clock_lbl = QLabel("")
-        f_clock = QFont("Menlo"); f_clock.setPointSize(14); f_clock.setBold(True)
-        self._clock_lbl.setFont(f_clock)
+        self._clock_lbl.setFont(mono_font(14, bold=True))
         self._clock_lbl.setStyleSheet("color: #555555;")
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tb_lay.addStretch()
@@ -83,9 +83,7 @@ class PerformanceView(QWidget):
 
         # Cue name
         self._curr_name = QLabel("—")
-        self._f_curr_name = QFont("Helvetica Neue")
-        self._f_curr_name.setPointSize(56)
-        self._f_curr_name.setBold(True)
+        self._f_curr_name = sans_font(56, bold=True)
         self._curr_name.setFont(self._f_curr_name)
         self._curr_name.setStyleSheet("color: #ffffff;")
         self._curr_name.setWordWrap(True)
@@ -141,9 +139,7 @@ class PerformanceView(QWidget):
         nr.addStretch()
 
         self._countdown_lbl = QLabel("")
-        self._f_countdown = QFont("Menlo")
-        self._f_countdown.setPointSize(36)
-        self._f_countdown.setBold(True)
+        self._f_countdown = mono_font(36, bold=True)
         self._countdown_lbl.setFont(self._f_countdown)
         self._countdown_lbl.setStyleSheet("color: #ffffff;")
         nr.addWidget(self._countdown_lbl)
@@ -180,8 +176,7 @@ class PerformanceView(QWidget):
 
         # ── Floating overlays ─────────────────────────────────────────────────
         self._tc_overlay = QLabel("--:--:--:--", self)
-        f_tc = QFont("Menlo"); f_tc.setPointSize(13)
-        self._tc_overlay.setFont(f_tc)
+        self._tc_overlay.setFont(mono_font(13))
         self._tc_overlay.setStyleSheet("color: #2a2a2a; background: transparent;")
         self._tc_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 

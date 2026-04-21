@@ -22,6 +22,7 @@ from cue_engine import CueEngine, CueParseError
 from ltc_decoder import LTCDecoder, LTCLibError
 from show_file import ShowFile, ShowSettings
 from ui.cue_table import CueTable, CueEditToolbar, OperatorEditPanel
+from ui.fonts import mono_font, sans_font
 from ui.performance_view import PerformanceView
 from ui.settings_dialog import SettingsDialog
 from ui.remote_panel import RemotePanel
@@ -138,8 +139,7 @@ class CueCard(QFrame):
         lay.addWidget(self.ops_lbl)
 
         self.cd_lbl = QLabel("")
-        fcd = QFont("Menlo"); fcd.setPointSize(16)
-        self.cd_lbl.setFont(fcd)
+        self.cd_lbl.setFont(mono_font(16))
         self.cd_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         lay.addWidget(self.cd_lbl)
 
@@ -244,8 +244,7 @@ class MainWindow(QMainWindow):
         hl.setSpacing(10)
 
         app_lbl = QLabel(APP_NAME)
-        fapp = QFont("Helvetica Neue"); fapp.setPointSize(15); fapp.setBold(True)
-        app_lbl.setFont(fapp)
+        app_lbl.setFont(sans_font(15, bold=True))
         app_lbl.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 1px;")
         hl.addWidget(app_lbl)
 
@@ -259,9 +258,8 @@ class MainWindow(QMainWindow):
         self._signal_dot.setStyleSheet(f"color: {ACCENT_RED.name()}; font-size: 16px;")
         hl.addWidget(self._signal_dot)
 
-        tc_font = QFont("Menlo"); tc_font.setPointSize(22); tc_font.setBold(True)
         self._tc_label = QLabel("--:--:--:--")
-        self._tc_label.setFont(tc_font)
+        self._tc_label.setFont(mono_font(22, bold=True))
         self._tc_label.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 2px;")
         hl.addWidget(self._tc_label)
 
@@ -703,10 +701,8 @@ class MainWindow(QMainWindow):
         self._table.set_edit_mode(True)
 
     def _on_cue_edit(self, row: int, field: str, value: str):
-        print(f"[MAIN] _on_cue_edit: row={row}, field={field}, value={value}")
         self._engine.update_cue_field(row, field, value)
         if field == "timecode":
-            print(f"[MAIN] after update, cue tc={self._engine.cues[row].timecode if row < len(self._engine.cues) else 'OUT OF RANGE'}")
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
         else:
@@ -930,10 +926,18 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _init_log(self):
-        log_dir = os.path.expanduser("~/Library/Logs/OJECueMonitor")
-        os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, datetime.now().strftime("session_%Y-%m-%d.log"))
+        system = platform.system()
+        if system == "Darwin":
+            log_dir = os.path.expanduser("~/Library/Logs/OJECueMonitor")
+        elif system == "Windows":
+            base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            log_dir = os.path.join(base, "OJECueMonitor", "Logs")
+        else:
+            base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+            log_dir = os.path.join(base, "OJECueMonitor", "logs")
         try:
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, datetime.now().strftime("session_%Y-%m-%d.log"))
             self._log_file = open(log_path, "a", encoding="utf-8")
             self._log(f"--- {APP_NAME} {VERSION} started ---")
         except OSError:
@@ -955,8 +959,7 @@ class MainWindow(QMainWindow):
         lay.setSpacing(12)
 
         title = QLabel(f"{APP_NAME}  {VERSION}")
-        ft = QFont("Helvetica Neue"); ft.setPointSize(18); ft.setBold(True)
-        title.setFont(ft)
+        title.setFont(sans_font(18, bold=True))
         title.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
         lay.addWidget(title)
 

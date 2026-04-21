@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QRect
 from PyQt6.QtGui import QColor, QFont, QBrush, QPainter, QPixmap, QIcon
 
 from cue_engine import Cue
+from ui.fonts import mono_font
 from typing import List, Optional, Tuple, Dict
 
 C_CURRENT    = QColor(55, 130, 55)
@@ -152,7 +153,7 @@ class TimecodePopup(QFrame):
 
         self._edit = QLineEdit()
         self._edit.setInputMask("00:00:00:00;0")
-        self._edit.setFont(QFont("Menlo", 16))
+        self._edit.setFont(mono_font(16))
         self._edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._edit.setStyleSheet(
             "QLineEdit { background: #0a0a0a; color: #ffffff; "
@@ -181,7 +182,6 @@ class TimecodePopup(QFrame):
         super().hideEvent(event)
 
     def _on_return(self):
-        print(f"[TC POPUP] _on_return called")
         self._try_apply()
         self.close()
 
@@ -383,7 +383,6 @@ class CueTable(QTableWidget):
         popup.show()
 
     def _apply_timecode(self, row: int, tc: str):
-        print(f"[TC TABLE] _apply_timecode: row={row}, tc={tc}")
         self.cue_data_changed.emit(row, "timecode", tc)
 
     # ── highlight ─────────────────────────────────────────────────────────────
