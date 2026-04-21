@@ -200,6 +200,8 @@ class MainWindow(QMainWindow):
         self._log_file        = None
         self._audio_devices: list = []
         self._web_remote: Optional[WebRemoteServer] = None
+        self._dirty           = False
+        self._state_dir       = self._compute_state_dir()
 
         self._init_log()
         self._scan_audio_devices()
@@ -214,6 +216,14 @@ class MainWindow(QMainWindow):
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(500)
         self._blink_timer.timeout.connect(self._do_blink)
+
+        # Autosave dirty cue data every 30 seconds to the state dir. The
+        # backup is cleared on explicit save / new / clean shutdown, so its
+        # presence at startup means the last session crashed mid-edit.
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(30_000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        self._autosave_timer.start()
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -441,7 +451,14 @@ class MainWindow(QMainWindow):
         geom = self._qsettings.value("geometry")
         if geom:
             self.restoreGeometry(geom)
+
         last_show = self._qsettings.value("last_show", "")
+
+        # Offer to recover from autosave if the previous session did not
+        # shut down cleanly.
+        if self._autosave_exists() and self._offer_autosave_recovery(last_show):
+            return
+
         if last_show and os.path.exists(last_show):
             self._load_show_file(last_show)
         else:
@@ -449,6 +466,47 @@ class MainWindow(QMainWindow):
             last_csv = self._qsettings.value("last_csv", "")
             if last_csv and os.path.exists(last_csv):
                 self._import_csv(last_csv)
+
+    def _offer_autosave_recovery(self, last_show: str) -> bool:
+        """Prompt the user to restore autosaved state.
+
+        Returns True if the autosave was loaded, False if the user declined
+        (in which case the autosave file has been deleted and the caller
+        should proceed with normal startup).
+        """
+        path = self._autosave_path()
+        reply = QMessageBox.question(
+            self, "Restore Unsaved Changes",
+            "The previous session ended before changes were saved.\n\n"
+            "Restore the autosaved cue list?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            self._clear_autosave()
+            return False
+
+        try:
+            self._show = ShowFile.load(path)
+            # The autosave lives in the state dir — not where the user
+            # thinks their show lives. Restore the previous file_path so
+            # an explicit Save writes back to the original .ojeshow.
+            if last_show:
+                self._show.file_path = last_show
+            self._show_settings = self._show.settings
+            self._engine.load_show_cues(self._show.cues)
+            self._table.load_cues(self._engine.cues)
+            self._apply_settings(self._show_settings)
+            name = os.path.basename(last_show) if last_show else "Recovered Show"
+            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
+            self._dirty = True  # keep the autosave file until next explicit save
+            logger.info("Recovered autosave from %s", path)
+            return True
+        except (OSError, ValueError) as e:
+            logger.error("Failed to load autosave: %s", e)
+            QMessageBox.warning(self, "Recovery Failed",
+                                f"Could not read the autosave file:\n{e}")
+            self._clear_autosave()
+            return False
 
     def _scan_audio_devices(self):
         self._audio_devices = []
@@ -492,6 +550,7 @@ class MainWindow(QMainWindow):
         self._table.load_cues(self._engine.cues)
         self._apply_settings(self._show_settings)
         self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  New Show")
+        self._clear_autosave()
         logger.info("New show created")
 
     def _open_show(self):
@@ -553,6 +612,7 @@ class MainWindow(QMainWindow):
             self._qsettings.setValue("last_show", path)
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._flash_save_ok()
+            self._clear_autosave()
             logger.info("Saved to %s", path)
         except OSError as e:
             logger.error("Save failed: %s", e)
@@ -587,6 +647,7 @@ class MainWindow(QMainWindow):
             self._show.save(path)
             self._qsettings.setValue("last_show", path)
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._clear_autosave()
             logger.info("Saved as %s", path)
         except OSError as e:
             QMessageBox.critical(self, "Save Error", str(e))
@@ -600,6 +661,7 @@ class MainWindow(QMainWindow):
             if new_settings:
                 self._show_settings = new_settings
                 self._apply_settings(new_settings)
+                self._mark_dirty()
 
     def _apply_settings(self, settings: ShowSettings):
         # Logo
@@ -699,6 +761,7 @@ class MainWindow(QMainWindow):
         # Refresh table row to show updated summary
         self._table.load_cues(self._engine.cues)
         self._table.set_edit_mode(True)
+        self._mark_dirty()
 
     def _on_cue_edit(self, row: int, field: str, value: str):
         self._engine.update_cue_field(row, field, value)
@@ -707,6 +770,7 @@ class MainWindow(QMainWindow):
             self._table.set_edit_mode(True)
         else:
             self._table.refresh_index_column(self._engine.cues)
+        self._mark_dirty()
 
     def _on_row_add(self, after_row: int):
         self._engine.add_cue(after_index_0=after_row)
@@ -714,6 +778,7 @@ class MainWindow(QMainWindow):
         self._table.set_edit_mode(True)
         new_row = min(after_row + 1, len(self._engine.cues) - 1)
         self._table.setCurrentCell(new_row, 3)
+        self._mark_dirty()
 
     def _on_row_delete(self, row: int):
         if row < 0 or row >= len(self._engine.cues):
@@ -728,6 +793,7 @@ class MainWindow(QMainWindow):
             self._engine.remove_cue(row)
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
+            self._mark_dirty()
 
     def _on_rows_delete(self, rows: list):
         if not rows:
@@ -741,6 +807,7 @@ class MainWindow(QMainWindow):
             self._engine.remove_cues(rows)
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
+            self._mark_dirty()
 
     def _on_divider_add(self, after_row: int):
         self._engine.add_cue(after_index_0=after_row, is_divider=True)
@@ -748,12 +815,14 @@ class MainWindow(QMainWindow):
         self._table.set_edit_mode(True)
         new_row = min(after_row + 1, len(self._engine.cues) - 1)
         self._table.setCurrentCell(new_row, 3)
+        self._mark_dirty()
 
     def _on_row_move(self, from_row: int, to_row: int):
         self._engine.move_cue(from_row, to_row)
         self._table.load_cues(self._engine.cues)
         self._table.set_edit_mode(True)
         self._table.setCurrentCell(to_row, self._table.currentColumn())
+        self._mark_dirty()
 
     # ── decoder ───────────────────────────────────────────────────────────────
 
@@ -925,23 +994,74 @@ class MainWindow(QMainWindow):
         lay.addWidget(ok_btn)
         dlg.exec()
 
-    def _init_log(self):
+    @staticmethod
+    def _compute_state_dir() -> str:
+        """Platform-appropriate directory for logs + autosave."""
         system = platform.system()
         if system == "Darwin":
-            log_dir = os.path.expanduser("~/Library/Logs/OJECueMonitor")
-        elif system == "Windows":
+            return os.path.expanduser("~/Library/Logs/OJECueMonitor")
+        if system == "Windows":
             base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-            log_dir = os.path.join(base, "OJECueMonitor", "Logs")
-        else:
-            base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
-            log_dir = os.path.join(base, "OJECueMonitor", "logs")
+            return os.path.join(base, "OJECueMonitor", "Logs")
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        return os.path.join(base, "OJECueMonitor", "logs")
+
+    def _autosave_path(self) -> str:
+        return os.path.join(self._state_dir, "autosave.ojeshow")
+
+    def _init_log(self):
         try:
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, datetime.now().strftime("session_%Y-%m-%d.log"))
+            os.makedirs(self._state_dir, exist_ok=True)
+            log_path = os.path.join(self._state_dir,
+                                    datetime.now().strftime("session_%Y-%m-%d.log"))
             self._log_file = open(log_path, "a", encoding="utf-8")
             self._log(f"--- {APP_NAME} {VERSION} started ---")
         except OSError:
             self._log_file = None
+
+    # ── Autosave ──────────────────────────────────────────────────────────────
+
+    def _autosave_tick(self):
+        if not self._dirty:
+            return
+        if not self._engine.cues:
+            return
+        try:
+            self._write_autosave()
+            self._dirty = False
+            self._log("autosave written")
+        except OSError as e:
+            logger.warning("Autosave failed: %s", e)
+
+    def _write_autosave(self):
+        path = self._autosave_path()
+        # Build a ShowFile from the current engine state + settings and save
+        # it atomically through a .tmp side-file so a crash mid-write cannot
+        # leave a half-written autosave that would kill recovery next time.
+        show = ShowFile(
+            settings=self._show_settings,
+            cues=self._engine.to_show_cues(),
+        )
+        tmp = path + ".tmp"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        show.save(tmp)
+        os.replace(tmp, path)
+
+    def _clear_autosave(self):
+        try:
+            os.remove(self._autosave_path())
+        except OSError:
+            pass
+        self._dirty = False
+
+    def _mark_dirty(self):
+        self._dirty = True
+
+    def _autosave_exists(self) -> bool:
+        try:
+            return os.path.getsize(self._autosave_path()) > 0
+        except OSError:
+            return False
 
     def _log(self, msg: str):
         if self._log_file:
@@ -1041,9 +1161,30 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def closeEvent(self, event):
+        # Offer to save unsaved changes before closing.
+        if self._dirty and self._engine.cues:
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "Save changes before closing?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                self._save_show()   # clears autosave on success
+            elif reply == QMessageBox.StandardButton.Discard:
+                self._clear_autosave()
+
         self._stop_decoder()
         if self._web_remote:
             self._web_remote.stop()
+        self._autosave_timer.stop()
+        # On a clean exit with no unsaved work, drop any stale autosave file.
+        if not self._dirty:
+            self._clear_autosave()
         self._qsettings.setValue("geometry", self.saveGeometry())
         if self._log_file:
             self._log("--- session ended ---")
