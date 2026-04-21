@@ -47,14 +47,32 @@ logging.basicConfig(level=logging.DEBUG, handlers=_handlers)
 APP_NAME  = "ØJE CUE MONITOR"
 VERSION   = "0.97beta"
 COPYRIGHT = "© 2026 ØJE Studio"
+WEBSITE   = "oje.studio"
+EMAIL     = "hello@oje.studio"
+
+
+def _resource_path(*parts: str) -> str:
+    """Absolute path to a bundled resource in dev and inside PyInstaller."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
 
 
 def main():
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
     app.setApplicationName("OJE Cue Monitor")
     app.setApplicationVersion(VERSION)
     app.setOrganizationName("OJE Studio")
+
+    # Application-wide window icon. The PyInstaller spec also points the .exe
+    # / .app metadata at the same file, but the in-window titlebar and
+    # taskbar grouping pick up the icon from the QApplication default.
+    icon_path = _resource_path("assets", "icon.ico")
+    if not os.path.exists(icon_path):
+        icon_path = _resource_path("assets", "icon_1024.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     app.setStyle("Fusion")
 

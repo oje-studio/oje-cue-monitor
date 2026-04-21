@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 APP_NAME  = "ØJE CUE MONITOR"
 VERSION   = "v0.97β"
 COPYRIGHT = "© 2026 ØJE Studio"
+WEBSITE   = "oje.studio"
+EMAIL     = "hello@oje.studio"
 
 # ── palette ───────────────────────────────────────────────────────────────────
 DARK_BG      = QColor(28, 28, 28)
@@ -289,13 +291,6 @@ class MainWindow(QMainWindow):
 
         hl.addStretch()
 
-        # Real time clock
-        self._clock_label = QLabel("")
-        self._clock_label.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 12px;")
-        hl.addWidget(self._clock_label)
-
-        hl.addWidget(_vline())
-
         self._live_label = QLabel("● LIVE")
         self._live_label.setStyleSheet(
             f"color: {ACCENT_GREEN.name()}; font-size: 12px; font-weight: bold;"
@@ -307,6 +302,24 @@ class MainWindow(QMainWindow):
         self._header_logo = QLabel()
         self._header_logo.setVisible(False)
         hl.addWidget(self._header_logo)
+
+        hl.addWidget(_vline())
+
+        # Transport controls live in the header top-right so they sit
+        # where the operator's eyes already are when reading timecode.
+        self._btn_perf = QPushButton("PERFORMANCE")
+        self._btn_perf.setFixedHeight(30)
+        self._btn_perf.setFixedWidth(130)
+        self._btn_perf.setStyleSheet(_perf_btn_style())
+        self._btn_perf.clicked.connect(self._enter_perf_mode)
+        hl.addWidget(self._btn_perf)
+
+        self._btn_start = QPushButton("START")
+        self._btn_start.setFixedHeight(30)
+        self._btn_start.setFixedWidth(72)
+        self._btn_start.setStyleSheet(_start_btn_style())
+        self._btn_start.clicked.connect(self._toggle_start)
+        hl.addWidget(self._btn_start)
 
         root.addWidget(header)
         root.addWidget(_hline())
@@ -408,25 +421,18 @@ class MainWindow(QMainWindow):
         self._btn_help.clicked.connect(self._show_help)
         fl.addWidget(self._btn_help)
 
-        cr_lbl = QLabel(f"{COPYRIGHT}  {VERSION}")
-        cr_lbl.setStyleSheet(f"color: {QColor(55,55,55).name()}; font-size: 10px;")
+        cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}  ·  {EMAIL}")
+        cr_lbl.setStyleSheet(f"color: {QColor(75,75,75).name()}; font-size: 10px;")
         fl.addWidget(cr_lbl)
 
         fl.addWidget(_vline())
 
-        self._btn_perf = QPushButton("Performance Mode")
-        self._btn_perf.setFixedHeight(30)
-        self._btn_perf.setFixedWidth(160)
-        self._btn_perf.setStyleSheet(_perf_btn_style())
-        self._btn_perf.clicked.connect(self._enter_perf_mode)
-        fl.addWidget(self._btn_perf)
-
-        self._btn_start = QPushButton("START")
-        self._btn_start.setFixedHeight(30)
-        self._btn_start.setFixedWidth(72)
-        self._btn_start.setStyleSheet(_start_btn_style())
-        self._btn_start.clicked.connect(self._toggle_start)
-        fl.addWidget(self._btn_start)
+        # Wall clock moved down here from the header — still visible for the
+        # operator tracking intermission / break times, but out of the way.
+        self._clock_label = QLabel("")
+        self._clock_label.setFont(mono_font(11))
+        self._clock_label.setStyleSheet(f"color: {TEXT_DIM.name()};")
+        fl.addWidget(self._clock_label)
 
         root.addWidget(footer)
 
@@ -1101,8 +1107,13 @@ class MainWindow(QMainWindow):
         title.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
         lay.addWidget(title)
 
-        sub = QLabel(f"{COPYRIGHT}\nLTC Timecode Cue List Manager for Live Shows")
+        sub = QLabel(
+            f"{COPYRIGHT}\n"
+            f"LTC Timecode Cue List Manager for Live Shows\n"
+            f"{WEBSITE}  ·  {EMAIL}"
+        )
         sub.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 12px;")
+        sub.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lay.addWidget(sub)
 
         lay.addWidget(_hline())

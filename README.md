@@ -2,6 +2,8 @@
 
 Live show operator tool — LTC/SMPTE timecode reader + cue list manager with performance mode.
 
+[oje.studio](https://oje.studio) · [hello@oje.studio](mailto:hello@oje.studio)
+
 ![Version](https://img.shields.io/badge/version-0.97beta-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.9+-green)
@@ -101,3 +103,7 @@ An example show file is included: `example_show.ojeshow`
 ## License
 
 © 2026 ØJE Studio. All rights reserved.
+
+---
+
+**ØJE Studio** — [oje.studio](https://oje.studio) · [hello@oje.studio](mailto:hello@oje.studio)

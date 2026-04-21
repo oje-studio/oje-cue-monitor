@@ -13,11 +13,11 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName',      u'\xd8JE Studio'),
+        [StringStruct(u'CompanyName',      u'\xd8JE Studio (oje.studio)'),
          StringStruct(u'FileDescription',  u'\xd8JE CUE MONITOR'),
          StringStruct(u'FileVersion',      u'0.97.0'),
          StringStruct(u'InternalName',     u'OJECueMonitor'),
-         StringStruct(u'LegalCopyright',   u'\xa9 2026 \xd8JE Studio'),
+         StringStruct(u'LegalCopyright',   u'\xa9 2026 \xd8JE Studio \xb7 oje.studio \xb7 hello@oje.studio'),
          StringStruct(u'OriginalFilename', u'OJE CUE MONITOR.exe'),
          StringStruct(u'ProductName',      u'\xd8JE CUE MONITOR'),
          StringStruct(u'ProductVersion',   u'0.97.0')])

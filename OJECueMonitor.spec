@@ -30,6 +30,12 @@ a = Analysis(
         ("example_cues.csv", "."),
         ("example_show.ojeshow", "."),
         ("ui/", "ui/"),
+        # Bundle assets/ so QIcon and the studio logo are loadable from
+        # the frozen bundle — the spec-level icon= only sets Finder/Dock.
+        ("assets/icon.ico", "assets"),
+        ("assets/icon.icns", "assets"),
+        ("assets/icon_1024.png", "assets"),
+        ("assets/logo_src.png", "assets"),
     ],
     hiddenimports=[
         "pyaudio",
@@ -98,6 +104,7 @@ app = BUNDLE(
         "CFBundleName":                 "ØJE CUE MONITOR",
         "CFBundleShortVersionString":   "0.97",
         "CFBundleVersion":              "0.97.0",
+        "NSHumanReadableCopyright":     "© 2026 ØJE Studio · oje.studio · hello@oje.studio",
         "NSMicrophoneUsageDescription": "ØJE CUE MONITOR needs microphone access to receive LTC timecode from the audio input.",
         "NSHighResolutionCapable":      True,
         "LSUIElement":                  False,

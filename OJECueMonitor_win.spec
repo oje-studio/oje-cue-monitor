@@ -19,6 +19,13 @@ a = Analysis(
     datas=[
         ("example_cues.csv", "."),
         ("example_show.ojeshow", "."),
+        # Bundle assets/ so the runtime can load the window icon (QIcon)
+        # and the studio logo at runtime — the spec-level icon= only sets
+        # the Explorer/taskbar icon, not the in-window titlebar.
+        ("assets/icon.ico", "assets"),
+        ("assets/icon.icns", "assets"),
+        ("assets/icon_1024.png", "assets"),
+        ("assets/logo_src.png", "assets"),
     ],
     hiddenimports=[
         "pyaudio",
