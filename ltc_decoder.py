@@ -197,6 +197,32 @@ class LTCDecoder(threading.Thread):
         decoder      = None
         num_channels = max(1, self.channel_index + 1)
 
+        # Validate the requested channel against the device before opening
+        # the stream. A raw PortAudio "Invalid number of channels" blows up
+        # the whole audio thread on some backends, so we reject early with
+        # a friendly message.
+        if self.device_index is not None:
+            try:
+                info = pa.get_device_info_by_index(self.device_index)
+                max_in = int(info.get("maxInputChannels", 0))
+            except Exception as e:
+                logger.warning("Could not query device info: %s", e)
+                max_in = None
+
+            if max_in is not None:
+                if max_in <= 0:
+                    self.out_queue.put(("error",
+                        "Selected device has no input channels."))
+                    pa.terminate()
+                    return
+                if self.channel_index >= max_in:
+                    self.out_queue.put(("error",
+                        f"Channel {self.channel_index + 1} is not available on this "
+                        f"device (only {max_in} channel{'s' if max_in != 1 else ''} "
+                        f"present).\n\nOpen Settings and pick a valid channel."))
+                    pa.terminate()
+                    return
+
         try:
             decoder = ltc_lib.ltc_decoder_create(SAMPLE_RATE, 1920)
             if not decoder:
@@ -220,7 +246,10 @@ class LTCDecoder(threading.Thread):
             )
             try:
                 stream = pa.open(**open_kwargs)
-            except OSError as e:
+            except Exception as e:
+                # PortAudio surfaces errors as OSError, ValueError, or its own
+                # pyaudio.PyAudioError depending on backend (WASAPI / MME /
+                # CoreAudio). Catch broadly so we never crash the audio thread.
                 logger.error("pa.open failed: %s", e)
                 self.out_queue.put(("error", f"Cannot open audio device:\n{e}"))
                 return

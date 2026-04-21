@@ -36,6 +36,8 @@ class SettingsDialog(QDialog):
         grp_audio = QGroupBox("Audio Input (LTC)")
         al = QFormLayout(grp_audio)
 
+        self._audio_devices = audio_devices
+
         self._combo_device = QComboBox()
         self._combo_device.addItem("(System Default)", "")
         for dev in audio_devices:
@@ -48,11 +50,10 @@ class SettingsDialog(QDialog):
                 break
         al.addRow("Device:", self._combo_device)
 
-        self._spin_channel = QSpinBox()
-        self._spin_channel.setMinimum(0)
-        self._spin_channel.setMaximum(63)
-        self._spin_channel.setValue(settings.audio_channel)
-        al.addRow("Channel:", self._spin_channel)
+        self._combo_channel = QComboBox()
+        al.addRow("Channel:", self._combo_channel)
+        self._combo_device.currentIndexChanged.connect(self._rebuild_channel_combo)
+        self._rebuild_channel_combo(preferred=settings.audio_channel)
 
         lay.addWidget(grp_audio)
 
@@ -155,6 +156,38 @@ class SettingsDialog(QDialog):
 
         root.addLayout(btn_lay)
 
+    def _rebuild_channel_combo(self, _unused=None, preferred: Optional[int] = None):
+        """Populate the channel combo based on the currently selected device."""
+        # Preserve existing selection across device changes when possible.
+        if preferred is None:
+            preferred = self._combo_channel.currentData()
+            if preferred is None:
+                preferred = 0
+
+        device_name = self._combo_device.currentData() or ""
+        max_channels = self._max_channels_for(device_name)
+
+        self._combo_channel.blockSignals(True)
+        self._combo_channel.clear()
+        for ch in range(max_channels):
+            self._combo_channel.addItem(f"Channel {ch + 1} of {max_channels}", ch)
+        # Clamp preferred to available range
+        target = min(max(int(preferred), 0), max_channels - 1)
+        self._combo_channel.setCurrentIndex(target)
+        self._combo_channel.blockSignals(False)
+
+    def _max_channels_for(self, device_name: str) -> int:
+        """Input-channel count for a device, with a safe default for the system default."""
+        if device_name:
+            for dev in self._audio_devices:
+                if dev["name"] == device_name:
+                    return max(1, int(dev["channels"]))
+        # System default — assume stereo; if the real device has more the user
+        # can pick it explicitly.
+        if self._audio_devices:
+            return max(1, int(self._audio_devices[0]["channels"]))
+        return 2
+
     def _add_operator_row(self, name: str):
         row = QHBoxLayout()
         edit = QLineEdit(name)
@@ -206,7 +239,7 @@ class SettingsDialog(QDialog):
 
         self._result_settings = ShowSettings(
             audio_device_name=self._combo_device.currentData() or "",
-            audio_channel=self._spin_channel.value(),
+            audio_channel=int(self._combo_channel.currentData() or 0),
             logo_path=logo,
             operator_names=op_names,
             perf_cue_name_size=self._spin_cue_name.value(),
