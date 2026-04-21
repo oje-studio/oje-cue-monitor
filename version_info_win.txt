@@ -1,0 +1,27 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 97, 0, 0),
+    prodvers=(0, 97, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        u'040904B0',
+        [StringStruct(u'CompanyName',      u'\xd8JE Studio'),
+         StringStruct(u'FileDescription',  u'\xd8JE CUE MONITOR'),
+         StringStruct(u'FileVersion',      u'0.97.0'),
+         StringStruct(u'InternalName',     u'OJECueMonitor'),
+         StringStruct(u'LegalCopyright',   u'\xa9 2026 \xd8JE Studio'),
+         StringStruct(u'OriginalFilename', u'OJE CUE MONITOR.exe'),
+         StringStruct(u'ProductName',      u'\xd8JE CUE MONITOR'),
+         StringStruct(u'ProductVersion',   u'0.97.0')])
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)

@@ -3,6 +3,7 @@ from typing import Optional
 
 import logging
 import os
+import platform
 import queue
 from datetime import datetime
 
@@ -357,7 +358,8 @@ class MainWindow(QMainWindow):
 
         self._btn_save = QPushButton("Save")
         self._btn_save.setFixedHeight(30)
-        self._btn_save.setToolTip("Save show file (.ojeshow)  [Cmd+S]")
+        _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
+        self._btn_save.setToolTip(f"Save show file (.ojeshow)  [{_mod}+S]")
         self._btn_save.clicked.connect(self._save_show)
         fl.addWidget(self._btn_save)
 
@@ -964,14 +966,15 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(_hline())
 
+        _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
         help_text = (
             "<h3 style='color:#dcdcdc;'>Keyboard Shortcuts</h3>"
             "<table cellpadding='4' style='color:#ccc; font-size:13px;'>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Cmd+N</td>"
+            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+N</td>"
             "    <td>New show</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Cmd+O</td>"
+            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+O</td>"
             "    <td>Open show file / import CSV</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Cmd+S</td>"
+            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+S</td>"
             "    <td>Save show</td></tr>"
             "<tr><td style='color:#7a7acd; font-weight:bold;'>P</td>"
             "    <td>Toggle Performance Mode</td></tr>"

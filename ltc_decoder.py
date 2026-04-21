@@ -14,10 +14,25 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-LTC_PATHS = [
-    "/opt/homebrew/lib/libltc.dylib",   # Apple Silicon
-    "/usr/local/lib/libltc.dylib",      # Intel
-]
+import platform
+import sys
+
+_IS_WIN = platform.system() == "Windows"
+
+def _base_dir() -> str:
+    """App base dir — PyInstaller bundle or script directory."""
+    return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+if _IS_WIN:
+    LTC_PATHS = [
+        os.path.join(_base_dir(), "libltc.dll"),
+        os.path.join(_base_dir(), "libs", "win64", "libltc.dll"),
+    ]
+else:
+    LTC_PATHS = [
+        "/opt/homebrew/lib/libltc.dylib",   # Apple Silicon
+        "/usr/local/lib/libltc.dylib",      # Intel
+    ]
 
 SAMPLE_RATE = 48000
 CHUNK       = 1024
@@ -80,9 +95,13 @@ class LTCLibError(Exception):
 def load_libltc():
     lib_path = find_libltc()
     if not lib_path:
-        raise LTCLibError(
-            "libltc not found.\n\nInstall with:\n  brew install libltc"
-        )
+        if _IS_WIN:
+            raise LTCLibError(
+                "libltc.dll not found.\n\nPlace libltc.dll next to the .exe.")
+        else:
+            raise LTCLibError(
+                "libltc not found.\n\nInstall with:\n  brew install libltc"
+            )
     logger.info("Loading libltc from: %s", lib_path)
     try:
         ltc = ctypes.CDLL(lib_path)
