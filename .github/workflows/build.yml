@@ -1,0 +1,134 @@
+name: Build
+
+# Runs on every push to main and on release tags. For main pushes / PRs, the
+# built binaries are uploaded as workflow artifacts (kept for 90 days). For
+# `v*` tags a GitHub Release is created automatically with the binaries
+# attached, which is what users will download.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by the release job to publish assets
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyQt6 pyaudio numpy "qrcode[pil]" aiohttp Pillow pyinstaller
+
+      - name: Build .exe
+        run: python -m PyInstaller OJECueMonitor_win.spec --noconfirm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OJE-CUE-MONITOR-Windows
+          path: "dist/OJE CUE MONITOR.exe"
+          if-no-files-found: error
+
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system deps (portaudio, libltc)
+        run: brew install portaudio libltc
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyQt6 pyaudio numpy "qrcode[pil]" aiohttp Pillow pyinstaller
+
+      - name: Build .app
+        run: python -m PyInstaller OJECueMonitor.spec --noconfirm
+
+      - name: Zip .app for artifact transport
+        # ditto preserves resource forks and extended attributes so the
+        # .app unzips on the user's machine looking exactly as built.
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent "ØJE CUE MONITOR.app" "OJE-CUE-MONITOR-macOS.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OJE-CUE-MONITOR-macOS
+          path: "dist/OJE-CUE-MONITOR-macOS.zip"
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: OJE-CUE-MONITOR-Windows
+          path: windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: OJE-CUE-MONITOR-macOS
+          path: macos
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          files: |
+            windows/OJE CUE MONITOR.exe
+            macos/OJE-CUE-MONITOR-macOS.zip
+          body: |
+            ## ØJE CUE MONITOR ${{ github.ref_name }}
+
+            Pre-built binaries. No Python install required.
+
+            ### Windows
+            Download `OJE CUE MONITOR.exe`. Single file — no installer.
+
+            On first launch Windows SmartScreen may show a warning because
+            the binary isn't code-signed. Click **More info** → **Run anyway**.
+
+            Logs are written to `%LOCALAPPDATA%\OJECueMonitor\Logs\`.
+
+            ### macOS (Apple Silicon)
+            Download `OJE-CUE-MONITOR-macOS.zip`, unzip, drag the `.app` to
+            Applications.
+
+            Gatekeeper may block the app because it isn't notarized. Workaround:
+            right-click the app → **Open** → **Open anyway**. Or in Terminal:
+
+                xattr -dr com.apple.quarantine "/Applications/ØJE CUE MONITOR.app"
+
+            Logs are written to `~/Library/Logs/OJECueMonitor/`.
+
+            ---
+
+            **ØJE Studio** · [oje.studio](https://oje.studio) · [hello@oje.studio](mailto:hello@oje.studio)
