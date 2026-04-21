@@ -201,6 +201,7 @@ class MainWindow(QMainWindow):
         self._audio_devices: list = []
         self._web_remote: Optional[WebRemoteServer] = None
         self._dirty           = False
+        self._autosave_fresh  = True   # does the autosave file reflect current state?
         self._state_dir       = self._compute_state_dir()
 
         self._init_log()
@@ -500,7 +501,11 @@ class MainWindow(QMainWindow):
             self._apply_settings(self._show_settings)
             name = os.path.basename(last_show) if last_show else "Recovered Show"
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
-            self._dirty = True  # keep the autosave file until next explicit save
+            # Keep the autosave file around until the user performs a real
+            # save — the loaded state is unsaved as far as the original .ojeshow
+            # is concerned, but the autosave file on disk already reflects it.
+            self._dirty = True
+            self._autosave_fresh = True
             logger.info("Recovered autosave from %s", path)
             return True
         except (OSError, ValueError) as e:
@@ -1024,14 +1029,19 @@ class MainWindow(QMainWindow):
     # ── Autosave ──────────────────────────────────────────────────────────────
 
     def _autosave_tick(self):
-        self._log(f"autosave tick: dirty={self._dirty} cues={len(self._engine.cues)}")
-        if not self._dirty:
+        self._log(f"autosave tick: dirty={self._dirty} fresh={self._autosave_fresh} cues={len(self._engine.cues)}")
+        # Skip work if we have nothing to save or nothing has changed since
+        # the last successful autosave write. Crucially, we do NOT flip
+        # _dirty here — it tracks "unsaved since last explicit save" and is
+        # only cleared by _save_show / _clear_autosave, so the close path
+        # can still detect truly unsaved work.
+        if not self._dirty or self._autosave_fresh:
             return
         if not self._engine.cues:
             return
         try:
             self._write_autosave()
-            self._dirty = False
+            self._autosave_fresh = True
             self._log("autosave written")
         except OSError as e:
             logger.warning("Autosave failed: %s", e)
@@ -1057,11 +1067,13 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
         self._dirty = False
+        self._autosave_fresh = True
 
     def _mark_dirty(self):
         if not self._dirty:
             self._log("dirty marked (was clean)")
         self._dirty = True
+        self._autosave_fresh = False
 
     def _autosave_exists(self) -> bool:
         try:
