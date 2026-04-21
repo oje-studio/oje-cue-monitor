@@ -61,6 +61,6 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    # icon="icon.ico",
+    icon=os.path.join("assets", "icon.ico"),
     version="version_info_win.txt",
 )

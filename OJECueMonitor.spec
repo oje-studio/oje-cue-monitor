@@ -73,7 +73,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon="icon.icns",   # uncomment and add icon.icns to use a custom icon
+    icon=os.path.join("assets", "icon.icns"),
 )
 
 coll = COLLECT(
@@ -90,7 +90,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="ØJE CUE MONITOR.app",
-    # icon="icon.icns",  # uncomment to use a custom icon
+    icon=os.path.join("assets", "icon.icns"),
     bundle_identifier="studio.oje.cuemonitor",
     version="0.97.0",
     info_plist={
