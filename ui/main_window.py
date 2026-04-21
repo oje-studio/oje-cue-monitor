@@ -217,11 +217,13 @@ class MainWindow(QMainWindow):
         self._blink_timer.setInterval(500)
         self._blink_timer.timeout.connect(self._do_blink)
 
-        # Autosave dirty cue data every 30 seconds to the state dir. The
-        # backup is cleared on explicit save / new / clean shutdown, so its
-        # presence at startup means the last session crashed mid-edit.
+        # Autosave dirty cue data every 10 seconds to the state dir (dropped
+        # from 30s so crashes during a quick edit session still produce a
+        # recoverable file). The backup is cleared on explicit save / new /
+        # clean shutdown, so its presence at startup means the last session
+        # crashed mid-edit.
         self._autosave_timer = QTimer(self)
-        self._autosave_timer.setInterval(30_000)
+        self._autosave_timer.setInterval(10_000)
         self._autosave_timer.timeout.connect(self._autosave_tick)
         self._autosave_timer.start()
 
@@ -1022,6 +1024,7 @@ class MainWindow(QMainWindow):
     # ── Autosave ──────────────────────────────────────────────────────────────
 
     def _autosave_tick(self):
+        self._log(f"autosave tick: dirty={self._dirty} cues={len(self._engine.cues)}")
         if not self._dirty:
             return
         if not self._engine.cues:
@@ -1032,6 +1035,7 @@ class MainWindow(QMainWindow):
             self._log("autosave written")
         except OSError as e:
             logger.warning("Autosave failed: %s", e)
+            self._log(f"autosave FAILED: {e}")
 
     def _write_autosave(self):
         path = self._autosave_path()
@@ -1055,6 +1059,8 @@ class MainWindow(QMainWindow):
         self._dirty = False
 
     def _mark_dirty(self):
+        if not self._dirty:
+            self._log("dirty marked (was clean)")
         self._dirty = True
 
     def _autosave_exists(self) -> bool:
