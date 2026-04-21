@@ -111,4 +111,12 @@ An example show file is included: `example_show.ojeshow`
 
 ---
 
-**ØJE Studio** — [oje.studio](https://oje.studio) · [hello@oje.studio](mailto:hello@oje.studio)
+## About ØJE Studio
+
+ØJE is an independent multimedia studio based in Vienna, operating internationally.
+
+We are structured as a cultural-tech practice uniting artistic authorship, technical leadership and production accountability within a single studio. Our team combines expertise in scenographic thinking, real-time systems and spatial media with the technical depth to realise projects end-to-end — from strategic concept development and documentation to technical passports, on-site coordination, testing and operational execution.
+
+ØJE positions itself between contemporary art, festival culture and spatial production, engaging with complex contexts where artistic intent and technical precision carry equal weight.
+
+[oje.studio](https://oje.studio) · [hello@oje.studio](mailto:hello@oje.studio)
