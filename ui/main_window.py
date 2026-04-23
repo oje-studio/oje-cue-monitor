@@ -111,6 +111,7 @@ class CueCard(QFrame):
             f"border: 1px solid {DARK_BORDER.name()}; border-radius: 6px; }}"
         )
         self._countdown_enabled = True
+        self._operator_names: list = []
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(4)
@@ -150,6 +151,9 @@ class CueCard(QFrame):
     def set_countdown_enabled(self, enabled: bool):
         self._countdown_enabled = enabled
 
+    def set_operators(self, operator_names: list):
+        self._operator_names = list(operator_names)
+
     def set_cue(self, cue, countdown: float = None):
         if cue is None:
             self.name_lbl.setText("—")
@@ -159,12 +163,15 @@ class CueCard(QFrame):
             return
         self.name_lbl.setText(cue.name or "—")
         self.desc_lbl.setText(cue.description)
-        # Show operator comments vertically (one per line)
-        ops_text = ""
-        if cue.operator_comments:
-            lines = [f"{k}: {v}" for k, v in cue.operator_comments.items() if v]
-            ops_text = "\n".join(lines)
-        self.ops_lbl.setText(ops_text)
+        # Iterate the current operator list (not cue.operator_comments keys)
+        # so renamed/removed operators don't leak stale entries into the view.
+        comments = cue.operator_comments or {}
+        lines = [
+            f"{name}: {comments[name]}"
+            for name in self._operator_names
+            if comments.get(name)
+        ]
+        self.ops_lbl.setText("\n".join(lines))
         if countdown is not None and self._countdown_enabled:
             m, s  = divmod(int(countdown), 60)
             color = ACCENT_RED.name() if countdown < 10 else TEXT_BRIGHT.name()
@@ -688,11 +695,19 @@ class MainWindow(QMainWindow):
         self._current_card.set_countdown_enabled(settings.countdown_enabled)
         self._next_card.set_countdown_enabled(settings.countdown_enabled)
 
+        # Cue cards need the current operator list to filter out stale keys
+        self._current_card.set_operators(settings.operator_names)
+        self._next_card.set_operators(settings.operator_names)
+
         # Performance view
         self._perf_view.apply_settings(settings)
 
         # Operator edit panel
         self._op_panel.set_operators(settings.operator_names)
+
+        # Re-render current/next cards so operator list changes take effect
+        # without waiting for the next timecode poll.
+        self._update_cues()
 
     # ── Web Remote ─────────────────────────────────────────────────────────────
 
