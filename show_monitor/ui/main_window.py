@@ -32,6 +32,7 @@ from ..show_file import load_show, save_show
 from ..world_clock import DriftMonitor, now_hms, now_seconds_of_day
 from .performance_view import PerformanceView
 from .settings_dialog import SettingsDialog
+from .widgets import OperatorEditPanel, TimecodePopup
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,10 @@ class ScenesPanel(QFrame):
 
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._table.cellDoubleClicked.connect(self._on_double_click)
+        # Right-click context menu
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_context_menu)
         lay.addWidget(self._table, 1)
 
         btn_row = QHBoxLayout()
@@ -259,6 +264,32 @@ class ScenesPanel(QFrame):
     def _on_selection_changed(self):
         self.scene_selected.emit(self._table.currentRow())
 
+    def _on_double_click(self, row: int, col: int):
+        if col != SCENE_COL_START:
+            return
+        item = self._table.item(row, col)
+        if not item:
+            return
+        rect = self._table.visualItemRect(item)
+        popup = TimecodePopup(item.text(), mask_key="hms", parent=self)
+        popup.move(self._table.viewport().mapToGlobal(rect.bottomLeft()))
+        popup.accepted.connect(
+            lambda tc, r=row: self.scene_field_changed.emit(r, "start_time", tc)
+        )
+        popup.show()
+
+    def _show_context_menu(self, pos):
+        from PyQt6.QtWidgets import QMenu
+        row = self._table.indexAt(pos).row()
+        menu = QMenu(self)
+        act_add = menu.addAction("Add Scene")
+        act_del = menu.addAction("Delete Scene") if row >= 0 else None
+        act = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if act is act_add:
+            self.scene_add.emit()
+        elif act_del is not None and act is act_del:
+            self.scene_remove.emit(row)
+
     def _on_remove(self):
         r = self._table.currentRow()
         if r >= 0:
@@ -273,6 +304,10 @@ COL_HEADERS = ["Offset", "Name", "Description", "Operator notes"]
 
 class CueTable(QTableWidget):
     cue_changed = pyqtSignal(int, str, str)  # row, field, value
+    cue_add = pyqtSignal(int)                # after row (-1 = append)
+    cue_delete = pyqtSignal(int)             # row
+    cue_duplicate = pyqtSignal(int)          # row
+    cue_selected = pyqtSignal(int)           # row
 
     def __init__(self, parent=None):
         super().__init__(0, len(COL_HEADERS), parent)
@@ -296,6 +331,59 @@ class CueTable(QTableWidget):
         self._cues: list = []
         self._current_cue_row: Optional[int] = None
         self.itemChanged.connect(self._on_item_changed)
+        self.cellDoubleClicked.connect(self._on_cell_dbl)
+        self.currentCellChanged.connect(self._on_current_cell_changed)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_menu)
+
+    def _on_cell_dbl(self, row: int, col: int):
+        if col != COL_OFFSET or row >= len(self._cues):
+            return
+        item = self.item(row, col)
+        if not item:
+            return
+        rect = self.visualItemRect(item)
+        popup = TimecodePopup(item.text(), mask_key="hmsff", parent=self)
+        popup.move(self.viewport().mapToGlobal(rect.bottomLeft()))
+        popup.accepted.connect(lambda tc, r=row: self._apply_offset(r, tc))
+        popup.show()
+
+    def _apply_offset(self, row: int, tc: str):
+        val = parse_offset(tc)
+        if val is None:
+            return
+        self.cue_changed.emit(row, "offset", str(val))
+
+    def refresh_offset(self, row: int, offset: float):
+        item = self.item(row, COL_OFFSET)
+        if item is None:
+            return
+        self.blockSignals(True)
+        item.setText(format_offset(offset))
+        self.blockSignals(False)
+
+    def _on_current_cell_changed(self, row, _col, _prow, _pcol):
+        if 0 <= row < len(self._cues):
+            self.cue_selected.emit(row)
+
+    def _show_menu(self, pos):
+        from PyQt6.QtWidgets import QMenu
+        row = self.indexAt(pos).row()
+        menu = QMenu(self)
+        act_add_after = menu.addAction("Add Cue After")
+        act_add_append = menu.addAction("Add Cue (end)")
+        act_dup = menu.addAction("Duplicate Cue") if row >= 0 else None
+        menu.addSeparator()
+        act_del = menu.addAction("Delete Cue") if row >= 0 else None
+        act = menu.exec(self.viewport().mapToGlobal(pos))
+        if act is act_add_after:
+            self.cue_add.emit(row)
+        elif act is act_add_append:
+            self.cue_add.emit(-1)
+        elif act_dup is not None and act is act_dup:
+            self.cue_duplicate.emit(row)
+        elif act_del is not None and act is act_del:
+            self.cue_delete.emit(row)
 
     def load_cues(self, cues, operator_names):
         self._cues = cues
@@ -332,23 +420,17 @@ class CueTable(QTableWidget):
         it = QTableWidgetItem(text or "")
         if mono:
             it.setFont(_mono(11))
-        if col == COL_OPS:
+        # Offset and operator-notes are read-only: offset goes through the
+        # timecode popup (double-click), operator notes through the panel.
+        if col in (COL_OFFSET, COL_OPS):
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.setItem(row, col, it)
 
     def _on_item_changed(self, item: QTableWidgetItem):
         row, col = item.row(), item.column()
         text = item.text()
-        if col == COL_OFFSET:
-            val = parse_offset(text)
-            if val is None:
-                # Revert to stored value
-                self.blockSignals(True)
-                item.setText(format_offset(self._cues[row].offset))
-                self.blockSignals(False)
-                return
-            self.cue_changed.emit(row, "offset", str(val))
-        elif col == COL_NAME:
+        # Offset is edited only via popup; inline changes are not wired here.
+        if col == COL_NAME:
             self.cue_changed.emit(row, "name", text)
         elif col == COL_DESC:
             self.cue_changed.emit(row, "description", text)
@@ -477,7 +559,17 @@ class MainWindow(QMainWindow):
 
         self._table = CueTable()
         self._table.cue_changed.connect(self._on_cue_changed)
+        self._table.cue_add.connect(self._on_cue_add_after)
+        self._table.cue_delete.connect(self._on_cue_delete_row)
+        self._table.cue_duplicate.connect(self._on_cue_duplicate)
+        self._table.cue_selected.connect(self._on_cue_selected)
         right_lay.addWidget(self._table, 1)
+
+        self._op_panel = OperatorEditPanel()
+        self._op_panel.operator_changed.connect(self._on_operator_changed)
+        self._op_panel.set_operators(self._show.settings.operator_names)
+        self._op_panel.hide_panel()
+        right_lay.addWidget(self._op_panel)
 
         cards_row = QHBoxLayout()
         self._current_card = CueCard("Current Cue")
@@ -590,8 +682,8 @@ class MainWindow(QMainWindow):
     def _apply_settings(self):
         """Push settings changes into all widgets that care about them."""
         s = self._show.settings
-        # Re-render cue cards so operator list changes show up immediately.
-        # Scene panel and cue table rebuilds happen via _reload_scenes.
+        self._op_panel.set_operators(s.operator_names)
+        self._op_panel.hide_panel()
         if self._perf_view is not None:
             self._perf_view.apply_settings(s)
             self._perf_view.set_operators(s.operator_names)
@@ -705,6 +797,8 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
 
     def _reload_scenes(self):
+        self._op_panel.set_operators(self._show.settings.operator_names)
+        self._op_panel.hide_panel()
         self._scenes_panel.set_scenes(self._show.scenes)
         if self._show.scenes:
             self._scenes_panel.select_row(self._active_scene_row)
@@ -716,31 +810,61 @@ class MainWindow(QMainWindow):
             self._table.load_cues([], self._show.settings.operator_names)
 
     # ── cue handlers ────
+    def _current_scene(self) -> Optional[Scene]:
+        if not self._show.scenes or not (0 <= self._active_scene_row < len(self._show.scenes)):
+            return None
+        return self._show.scenes[self._active_scene_row]
+
     def _on_cue_add(self):
-        if not self._show.scenes:
+        self._on_cue_add_after(-1)
+
+    def _on_cue_add_after(self, after_row: int):
+        sc = self._current_scene()
+        if sc is None:
             QMessageBox.information(self, "No scene", "Add a scene first.")
             return
-        sc = self._show.scenes[self._active_scene_row]
-        sc.cues.append(SceneCue(offset=0.0, name="New cue"))
+        new_cue = SceneCue(offset=0.0, name="New cue")
+        if after_row < 0 or after_row >= len(sc.cues):
+            sc.cues.append(new_cue)
+            new_row = len(sc.cues) - 1
+        else:
+            sc.cues.insert(after_row + 1, new_cue)
+            new_row = after_row + 1
         self._table.load_cues(sc.cues, self._show.settings.operator_names)
+        self._table.setCurrentCell(new_row, 1)  # focus on Name for quick typing
         self._mark_dirty()
 
     def _on_cue_delete(self):
-        row = self._table.currentRow()
-        if not self._show.scenes or row < 0:
-            return
-        sc = self._show.scenes[self._active_scene_row]
-        if row >= len(sc.cues):
+        self._on_cue_delete_row(self._table.currentRow())
+
+    def _on_cue_delete_row(self, row: int):
+        sc = self._current_scene()
+        if sc is None or not (0 <= row < len(sc.cues)):
             return
         del sc.cues[row]
         self._table.load_cues(sc.cues, self._show.settings.operator_names)
         self._mark_dirty()
 
-    def _on_cue_changed(self, row: int, field: str, value: str):
-        if not self._show.scenes:
+    def _on_cue_duplicate(self, row: int):
+        sc = self._current_scene()
+        if sc is None or not (0 <= row < len(sc.cues)):
             return
-        sc = self._show.scenes[self._active_scene_row]
-        if not (0 <= row < len(sc.cues)):
+        src = sc.cues[row]
+        clone = SceneCue(
+            offset=src.offset,
+            name=src.name,
+            description=src.description,
+            color=src.color,
+            operator_comments=dict(src.operator_comments),
+        )
+        sc.cues.insert(row + 1, clone)
+        self._table.load_cues(sc.cues, self._show.settings.operator_names)
+        self._table.setCurrentCell(row + 1, 0)
+        self._mark_dirty()
+
+    def _on_cue_changed(self, row: int, field: str, value: str):
+        sc = self._current_scene()
+        if sc is None or not (0 <= row < len(sc.cues)):
             return
         cue = sc.cues[row]
         if field == "offset":
@@ -748,10 +872,31 @@ class MainWindow(QMainWindow):
                 cue.offset = float(value)
             except ValueError:
                 return
+            # Canonicalise the displayed offset (raw seconds → HH:MM:SS.FF)
+            self._table.refresh_offset(row, cue.offset)
         elif field == "name":
             cue.name = value
         elif field == "description":
             cue.description = value
+        self._mark_dirty()
+
+    def _on_cue_selected(self, row: int):
+        sc = self._current_scene()
+        if sc is None or not (0 <= row < len(sc.cues)):
+            self._op_panel.hide_panel()
+            return
+        self._op_panel.show_for_cue(row, sc.cues[row].operator_comments)
+
+    def _on_operator_changed(self, row: int, op_name: str, comment: str):
+        sc = self._current_scene()
+        if sc is None or not (0 <= row < len(sc.cues)):
+            return
+        cue = sc.cues[row]
+        if comment:
+            cue.operator_comments[op_name] = comment
+        else:
+            cue.operator_comments.pop(op_name, None)
+        self._table.load_cues(sc.cues, self._show.settings.operator_names)
         self._mark_dirty()
 
     # ── file handlers ────
