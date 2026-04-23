@@ -57,6 +57,8 @@ def load_show(path: str) -> Show:
     s = data.get("settings", {})
     settings = ShowSettings(
         operator_names=list(s.get("operator_names", ["Operator 1"])),
+        audio_device_name=str(s.get("audio_device_name", "")),
+        audio_channel=int(s.get("audio_channel", 0)),
         drift_warning_seconds=float(s.get("drift_warning_seconds", 5.0)),
         perf_clock_size=int(s.get("perf_clock_size", 96)),
         perf_clock_color=str(s.get("perf_clock_color", "#ffffff")),

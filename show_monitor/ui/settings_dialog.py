@@ -13,8 +13,8 @@ from typing import List, Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QCheckBox, QColorDialog, QDialog, QDoubleSpinBox, QFormLayout, QFrame,
-    QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
+    QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -22,12 +22,13 @@ from ..scene_model import ShowSettings
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: ShowSettings, parent=None):
+    def __init__(self, settings: ShowSettings, audio_devices: list, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Show Settings")
         self.setMinimumWidth(520)
         self.setMinimumHeight(640)
         self._settings = settings
+        self._audio_devices = audio_devices
         self._result: Optional[ShowSettings] = None
 
         root = QVBoxLayout(self)
@@ -40,6 +41,28 @@ class SettingsDialog(QDialog):
         lay = QVBoxLayout(content)
         lay.setSpacing(16)
         lay.setContentsMargins(8, 8, 8, 8)
+
+        # ── Audio (LTC) ────
+        grp_audio = QGroupBox("Audio Input (LTC)")
+        al = QFormLayout(grp_audio)
+
+        self._combo_device = QComboBox()
+        self._combo_device.addItem("(Off — no LTC)", "")
+        for dev in audio_devices:
+            label = f"{dev['name']}  [{dev['channels']}ch]"
+            self._combo_device.addItem(label, dev["name"])
+        for i in range(self._combo_device.count()):
+            if self._combo_device.itemData(i) == settings.audio_device_name:
+                self._combo_device.setCurrentIndex(i)
+                break
+        al.addRow("Device:", self._combo_device)
+
+        self._combo_channel = QComboBox()
+        al.addRow("Channel:", self._combo_channel)
+        self._combo_device.currentIndexChanged.connect(self._rebuild_channel_combo)
+        self._rebuild_channel_combo(preferred=settings.audio_channel)
+
+        lay.addWidget(grp_audio)
 
         # ── Operators ────
         grp_ops = QGroupBox("Operators")
@@ -132,6 +155,30 @@ class SettingsDialog(QDialog):
         root.addLayout(btn_lay)
 
     # ── helpers ────
+    def _rebuild_channel_combo(self, _unused=None, preferred: Optional[int] = None):
+        if preferred is None:
+            preferred = self._combo_channel.currentData()
+            if preferred is None:
+                preferred = 0
+        device_name = self._combo_device.currentData() or ""
+        max_channels = self._max_channels_for(device_name)
+        self._combo_channel.blockSignals(True)
+        self._combo_channel.clear()
+        for ch in range(max_channels):
+            self._combo_channel.addItem(f"Channel {ch + 1} of {max_channels}", ch)
+        target = min(max(int(preferred), 0), max_channels - 1)
+        self._combo_channel.setCurrentIndex(target)
+        self._combo_channel.blockSignals(False)
+
+    def _max_channels_for(self, device_name: str) -> int:
+        if device_name:
+            for dev in self._audio_devices:
+                if dev["name"] == device_name:
+                    return max(1, int(dev["channels"]))
+        if self._audio_devices:
+            return max(1, int(self._audio_devices[0]["channels"]))
+        return 2
+
     def _mk_spin(self, lo: int, hi: int, val: int) -> QSpinBox:
         s = QSpinBox()
         s.setRange(lo, hi)
@@ -186,6 +233,8 @@ class SettingsDialog(QDialog):
 
         self._result = ShowSettings(
             operator_names=op_names,
+            audio_device_name=self._combo_device.currentData() or "",
+            audio_channel=int(self._combo_channel.currentData() or 0),
             drift_warning_seconds=float(self._spin_drift.value()),
             perf_clock_size=self._spin_clock.value(),
             perf_clock_color=self._clock_color,

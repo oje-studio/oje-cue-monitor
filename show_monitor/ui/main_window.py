@@ -22,9 +22,10 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import APP_NAME, FILE_EXT, VERSION
-from ..engine import Playhead, resolve
+from ..engine import Playhead, TimeContext, resolve
+from ..ltc_source import LTCSource
 from ..scene_model import (
-    Scene, SceneCue, Show, ShowSettings, TIME_SOURCES, TIME_SOURCE_LABELS,
+    Scene, SceneCue, Show, ShowSettings, TIME_SOURCES, TIME_SOURCE_LABELS, TIME_SOURCE_LTC,
     format_offset, parse_offset,
 )
 from ..show_file import load_show, save_show
@@ -73,10 +74,20 @@ class TopBar(QFrame):
 
         lay.addStretch()
 
+        clock_col = QVBoxLayout()
+        clock_col.setSpacing(2)
         self.clock = QLabel("--:--:--")
         self.clock.setFont(_mono(36))
+        self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.clock.setStyleSheet(f"color: {TEXT_BRIGHT};")
-        lay.addWidget(self.clock)
+        clock_col.addWidget(self.clock)
+
+        self.ltc = QLabel("LTC  --:--:--:--")
+        self.ltc.setFont(_mono(12))
+        self.ltc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ltc.setStyleSheet(f"color: {TEXT_DIM};")
+        clock_col.addWidget(self.ltc)
+        lay.addLayout(clock_col)
 
         lay.addStretch()
 
@@ -97,6 +108,16 @@ class TopBar(QFrame):
         sign = "+" if drift >= 0 else "−"
         self.drift.setText(f"NTP drift: {sign}{abs(drift):.2f}s")
         self.drift.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
+
+    def set_ltc(self, tc: str, has_signal: bool, running: bool):
+        if not running:
+            self.ltc.setText("LTC  off")
+            self.ltc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 11px;")
+            return
+        color = ACCENT_GREEN if has_signal else ACCENT_RED
+        label = "LTC" if has_signal else "LTC  no signal"
+        self.ltc.setText(f"{label}  {tc}" if has_signal else label)
+        self.ltc.setStyleSheet(f"color: {color}; font-size: 11px;")
 
 
 # ── Scenes list ───────────────────────────────────────────────────────────────
@@ -411,6 +432,10 @@ class MainWindow(QMainWindow):
         self._drift = DriftMonitor()
         self._drift.start()
 
+        self._ltc = LTCSource()
+        self._audio_devices: list = []
+        self._scan_audio_devices()
+
         self._perf_view: Optional[PerformanceView] = None
 
         # ── Layout ────
@@ -514,7 +539,20 @@ class MainWindow(QMainWindow):
         drift_state = self._drift.state()
         self._topbar.set_drift(drift_state["drift"], self._show.settings.drift_warning_seconds)
 
-        ph = resolve(self._show, now_seconds_of_day())
+        # Drain LTC decoder messages; update TopBar indicator
+        if self._ltc.is_running():
+            self._ltc.poll()
+        self._topbar.set_ltc(
+            self._ltc.current_tc_string(),
+            self._ltc.has_signal(),
+            self._ltc.is_running(),
+        )
+
+        ctx = TimeContext(
+            world=now_seconds_of_day(),
+            ltc=self._ltc.current_seconds(),
+        )
+        ph = resolve(self._show, ctx)
         self._update_cards(ph)
         # Light-weight: just re-styles existing rows, doesn't touch editable
         # cells or rebuild the table (won't interrupt inline edits).
@@ -541,7 +579,7 @@ class MainWindow(QMainWindow):
             self._perf_view.show_next(nxt_cue, ph.countdown())
 
     def _open_settings(self):
-        dlg = SettingsDialog(self._show.settings, self)
+        dlg = SettingsDialog(self._show.settings, self._audio_devices, self)
         if dlg.exec():
             new = dlg.get_settings()
             if new is not None:
@@ -558,6 +596,54 @@ class MainWindow(QMainWindow):
             self._perf_view.apply_settings(s)
             self._perf_view.set_operators(s.operator_names)
         self._reload_scenes()
+        # Restart LTC with the current settings — only if the show actually
+        # has a scene that wants LTC, otherwise keep it off to avoid grabbing
+        # the audio device unnecessarily.
+        self._sync_ltc()
+
+    def _any_scene_uses_ltc(self) -> bool:
+        return any(sc.time_source == TIME_SOURCE_LTC for sc in self._show.scenes)
+
+    def _scan_audio_devices(self):
+        self._audio_devices = []
+        try:
+            import pyaudio
+            pa = pyaudio.PyAudio()
+            for i in range(pa.get_device_count()):
+                info = pa.get_device_info_by_index(i)
+                if info.get("maxInputChannels", 0) > 0:
+                    self._audio_devices.append({
+                        "index": i,
+                        "name": info["name"],
+                        "channels": int(info["maxInputChannels"]),
+                    })
+            pa.terminate()
+        except Exception as e:
+            logger.error("Failed to scan audio devices: %s", e)
+
+    def _sync_ltc(self):
+        """Start/stop the LTC decoder based on settings and scene usage."""
+        s = self._show.settings
+        want_on = bool(s.audio_device_name) and self._any_scene_uses_ltc()
+
+        if not want_on:
+            if self._ltc.is_running():
+                self._ltc.stop()
+            return
+
+        # Already running on the same device+channel? leave it.
+        if self._ltc.is_running():
+            return
+
+        # Resolve device name -> pyaudio device index
+        dev_index = None
+        for dev in self._audio_devices:
+            if dev["name"] == s.audio_device_name:
+                dev_index = dev["index"]
+                break
+        err = self._ltc.start(dev_index, s.audio_channel)
+        if err:
+            QMessageBox.warning(self, "LTC error", err)
 
     def _toggle_performance(self):
         if self._perf_view is not None:
@@ -588,6 +674,7 @@ class MainWindow(QMainWindow):
         self._show.scenes.append(Scene(name=default_name, start_time=now_hms()))
         self._active_scene_row = len(self._show.scenes) - 1
         self._reload_scenes()
+        self._sync_ltc()
         self._mark_dirty()
 
     def _on_scene_remove(self, row: int):
@@ -599,6 +686,7 @@ class MainWindow(QMainWindow):
         del self._show.scenes[row]
         self._active_scene_row = max(0, min(self._active_scene_row, len(self._show.scenes) - 1))
         self._reload_scenes()
+        self._sync_ltc()
         self._mark_dirty()
 
     def _on_scene_field_changed(self, row: int, field: str, value: str):
@@ -611,6 +699,9 @@ class MainWindow(QMainWindow):
             sc.start_time = value
         elif field == "time_source":
             sc.time_source = value
+            # LTC may need to start/stop depending on whether any scene
+            # now/no-longer uses it.
+            self._sync_ltc()
         self._mark_dirty()
 
     def _reload_scenes(self):
@@ -671,6 +762,7 @@ class MainWindow(QMainWindow):
         self._file_path = None
         self._active_scene_row = 0
         self._reload_scenes()
+        self._sync_ltc()
         self._dirty = False
         self._update_title()
 
@@ -690,6 +782,7 @@ class MainWindow(QMainWindow):
         self._file_path = path
         self._active_scene_row = 0
         self._reload_scenes()
+        self._sync_ltc()
         self._dirty = False
         self._update_title()
 
@@ -736,4 +829,5 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._drift.stop()
+        self._ltc.stop()
         super().closeEvent(event)

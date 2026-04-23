@@ -61,6 +61,10 @@ class Scene:
 class ShowSettings:
     operator_names: List[str] = field(default_factory=lambda: ["Operator 1"])
 
+    # LTC input — show-wide, not per-scene. Empty device name means "off".
+    audio_device_name: str = ""
+    audio_channel: int = 0
+
     # Drift threshold (seconds) for local clock vs NTP — warning above this.
     drift_warning_seconds: float = 5.0
 
