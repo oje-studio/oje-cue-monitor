@@ -13,7 +13,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from . import FILE_VERSION
-from .scene_model import Scene, SceneCue, Show, ShowSettings
+from .scene_model import Scene, SceneCue, Show, ShowSettings, TIME_SOURCES, TIME_SOURCE_WORLD
 
 
 def save_show(show: Show, path: str) -> None:
@@ -26,6 +26,7 @@ def save_show(show: Show, path: str) -> None:
                 "id": sc.id,
                 "name": sc.name,
                 "start_time": sc.start_time,
+                "time_source": sc.time_source,
                 "cues": [
                     {
                         "id": c.id,
@@ -80,9 +81,13 @@ def load_show(path: str) -> Show:
                 operator_comments=dict(cd.get("operator_comments", {})),
                 id=str(cd.get("id") or SceneCue().id),
             ))
+        src = str(sd.get("time_source", TIME_SOURCE_WORLD))
+        if src not in TIME_SOURCES:
+            src = TIME_SOURCE_WORLD
         scenes.append(Scene(
             name=str(sd.get("name", "")),
             start_time=str(sd.get("start_time", "00:00:00")),
+            time_source=src,
             cues=cues,
             id=str(sd.get("id") or Scene().id),
         ))

@@ -16,30 +16,37 @@ from typing import Optional
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QFont, QKeySequence
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QApplication, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMenuBar, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenuBar, QMessageBox,
+    QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, FILE_EXT, VERSION
 from ..engine import Playhead, resolve
-from ..scene_model import Scene, SceneCue, Show, ShowSettings, format_offset, parse_offset
+from ..scene_model import (
+    Scene, SceneCue, Show, ShowSettings, TIME_SOURCES, TIME_SOURCE_LABELS,
+    format_offset, parse_offset,
+)
 from ..show_file import load_show, save_show
 from ..world_clock import DriftMonitor, now_hms, now_seconds_of_day
 from .performance_view import PerformanceView
+from .settings_dialog import SettingsDialog
 
 logger = logging.getLogger(__name__)
 
-DARK_BG = "#101010"
-DARK_PANEL = "#1a1a1a"
-DARK_BORDER = "#2a2a2a"
-TEXT_BRIGHT = "#f0f0f0"
-TEXT_DIM = "#888888"
-ACCENT_BLUE = "#4a90d9"
-ACCENT_YELLOW = "#e6c840"
-ACCENT_RED = "#e05050"
-ACCENT_GREEN = "#60c070"
+# Colour palette mirrors the classic CUE MONITOR so the two apps feel
+# like siblings rather than independent tools.
+DARK_BG      = "#1c1c1c"
+DARK_PANEL   = "#2a2a2a"
+DARK_BORDER  = "#3a3a3a"
+TEXT_BRIGHT  = "#dadada"
+TEXT_DIM     = "#878787"
+ACCENT_BLUE   = "#3773c3"
+ACCENT_YELLOW = "#e1c337"
+ACCENT_RED    = "#d74b4b"
+ACCENT_GREEN  = "#4bc373"
+ACCENT_ORANGE = "#e18730"
+NEAR_BLACK   = "#121212"
 
 
 def _mono(size: int) -> QFont:
@@ -94,11 +101,20 @@ class TopBar(QFrame):
 
 # ── Scenes list ───────────────────────────────────────────────────────────────
 
+SCENE_COL_NAME, SCENE_COL_START, SCENE_COL_SOURCE = 0, 1, 2
+SCENE_HEADERS = ["Scene Name", "Start Time", "Source"]
+
+
 class ScenesPanel(QFrame):
+    """
+    Scene editor. Inline editing for name + start time; time source via
+    a combobox. Selection drives which scene's cues are shown on the
+    right; the "active" scene (current playhead) is highlighted green.
+    """
     scene_selected = pyqtSignal(int)
     scene_add = pyqtSignal()
     scene_remove = pyqtSignal(int)
-    scene_renamed = pyqtSignal(int, str, str)  # index, new_name, new_start
+    scene_field_changed = pyqtSignal(int, str, str)  # row, field, value
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -114,66 +130,118 @@ class ScenesPanel(QFrame):
         hdr.setStyleSheet(f"color: {ACCENT_BLUE}; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
         lay.addWidget(hdr)
 
-        self._list = QListWidget()
-        self._list.setStyleSheet(
-            f"QListWidget {{ background: {DARK_BG}; color: {TEXT_BRIGHT}; border: 1px solid {DARK_BORDER}; }}"
-            f"QListWidget::item:selected {{ background: {ACCENT_BLUE}; color: white; }}"
+        self._table = QTableWidget(0, len(SCENE_HEADERS))
+        self._table.setHorizontalHeaderLabels(SCENE_HEADERS)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setStyleSheet(
+            f"QTableWidget {{ background: {DARK_BG}; color: {TEXT_BRIGHT};"
+            f" gridline-color: {DARK_BORDER}; border: 1px solid {DARK_BORDER}; }}"
+            f"QHeaderView::section {{ background: {DARK_PANEL}; color: {TEXT_DIM};"
+            f" border: none; padding: 4px 8px; font-weight: bold; font-size: 10px; letter-spacing: 1px; }}"
+            f"QTableWidget::item:selected {{ background: {ACCENT_BLUE}; color: white; }}"
         )
-        self._list.currentRowChanged.connect(self.scene_selected.emit)
-        self._list.itemDoubleClicked.connect(self._on_double_click)
-        lay.addWidget(self._list, 1)
+        hh = self._table.horizontalHeader()
+        hh.setSectionResizeMode(SCENE_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(SCENE_COL_START, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(SCENE_COL_SOURCE, QHeaderView.ResizeMode.ResizeToContents)
+
+        self._table.itemChanged.connect(self._on_item_changed)
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        lay.addWidget(self._table, 1)
 
         btn_row = QHBoxLayout()
         add = QPushButton("+ Scene")
         add.clicked.connect(self.scene_add.emit)
-        rm = QPushButton("−")
+        rm = QPushButton("− Scene")
         rm.clicked.connect(self._on_remove)
-        rm.setFixedWidth(30)
         btn_row.addWidget(add)
         btn_row.addWidget(rm)
         lay.addLayout(btn_row)
 
-    def set_scenes(self, scenes, active_index: Optional[int] = None):
-        prev = self._list.currentRow()
-        self._list.blockSignals(True)
-        self._list.clear()
+    # ── public API ────
+    def set_scenes(self, scenes):
+        """Full rebuild — call only when the scenes list itself changes."""
+        prev = self._table.currentRow()
+        self._table.blockSignals(True)
+        self._table.setRowCount(len(scenes))
         for i, sc in enumerate(scenes):
-            label = f"{sc.start_time}   {sc.name or '(unnamed)'}"
-            it = QListWidgetItem(label)
-            if active_index == i:
-                it.setForeground(QColor(ACCENT_GREEN))
-                f = it.font(); f.setBold(True); it.setFont(f)
-            self._list.addItem(it)
-        if prev >= 0 and prev < len(scenes):
-            self._list.setCurrentRow(prev)
+            name_item = QTableWidgetItem(sc.name or "")
+            start_item = QTableWidgetItem(sc.start_time or "00:00:00")
+            start_item.setFont(_mono(11))
+            src_item = QTableWidgetItem("")
+            src_item.setFlags(src_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+
+            self._table.setItem(i, SCENE_COL_NAME, name_item)
+            self._table.setItem(i, SCENE_COL_START, start_item)
+            self._table.setItem(i, SCENE_COL_SOURCE, src_item)
+
+            combo = QComboBox()
+            for src in TIME_SOURCES:
+                combo.addItem(TIME_SOURCE_LABELS[src], src)
+            idx = next((k for k, s in enumerate(TIME_SOURCES) if s == sc.time_source), 0)
+            combo.setCurrentIndex(idx)
+            combo.currentIndexChanged.connect(
+                lambda _idx, row=i, c=combo: self.scene_field_changed.emit(
+                    row, "time_source", c.currentData()
+                )
+            )
+            self._table.setCellWidget(i, SCENE_COL_SOURCE, combo)
+
+        if 0 <= prev < len(scenes):
+            self._table.selectRow(prev)
         elif scenes:
-            self._list.setCurrentRow(0)
-        self._list.blockSignals(False)
+            self._table.selectRow(0)
+        self._table.blockSignals(False)
+
+    def mark_active(self, active_index: Optional[int]):
+        """Light touch — just restyles existing rows. Safe to call on every tick."""
+        for row in range(self._table.rowCount()):
+            is_active = (row == active_index)
+            for col in (SCENE_COL_NAME, SCENE_COL_START):
+                it = self._table.item(row, col)
+                if not it:
+                    continue
+                it.setForeground(QColor(ACCENT_GREEN) if is_active else QColor(TEXT_BRIGHT))
+                f = it.font(); f.setBold(is_active); it.setFont(f)
 
     def current_row(self) -> int:
-        return self._list.currentRow()
+        return self._table.currentRow()
+
+    def select_row(self, row: int):
+        if 0 <= row < self._table.rowCount():
+            self._table.selectRow(row)
+
+    # ── signals ────
+    def _on_item_changed(self, item: QTableWidgetItem):
+        row, col = item.row(), item.column()
+        text = item.text().strip()
+        if col == SCENE_COL_NAME:
+            self.scene_field_changed.emit(row, "name", text)
+        elif col == SCENE_COL_START:
+            # Light validation: accept HH:MM:SS, otherwise revert
+            ok = False
+            if text.count(":") == 2:
+                try:
+                    h, m, s = (int(x) for x in text.split(":"))
+                    ok = 0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59
+                except ValueError:
+                    ok = False
+            if not ok:
+                self._table.blockSignals(True)
+                item.setText("00:00:00")
+                self._table.blockSignals(False)
+                text = "00:00:00"
+            self.scene_field_changed.emit(row, "start_time", text)
+
+    def _on_selection_changed(self):
+        self.scene_selected.emit(self._table.currentRow())
 
     def _on_remove(self):
-        r = self._list.currentRow()
+        r = self._table.currentRow()
         if r >= 0:
             self.scene_remove.emit(r)
-
-    def _on_double_click(self, item: QListWidgetItem):
-        row = self._list.row(item)
-        # Two-field editor: scene name and start time
-        current_text = item.text()
-        # Extract from "HH:MM:SS   Name"
-        current_start, _, current_name = current_text.partition("   ")
-        name, ok = QInputDialog.getText(self, "Scene name", "Name:", text=current_name)
-        if not ok:
-            return
-        start, ok2 = QInputDialog.getText(
-            self, "Scene start time",
-            "Start time (HH:MM:SS):", text=current_start,
-        )
-        if not ok2:
-            return
-        self.scene_renamed.emit(row, name.strip(), start.strip())
 
 
 # ── Cue table ─────────────────────────────────────────────────────────────────
@@ -361,7 +429,7 @@ class MainWindow(QMainWindow):
         self._scenes_panel.scene_selected.connect(self._on_scene_selected)
         self._scenes_panel.scene_add.connect(self._on_scene_add)
         self._scenes_panel.scene_remove.connect(self._on_scene_remove)
-        self._scenes_panel.scene_renamed.connect(self._on_scene_renamed)
+        self._scenes_panel.scene_field_changed.connect(self._on_scene_field_changed)
         splitter.addWidget(self._scenes_panel)
 
         right = QWidget()
@@ -432,6 +500,12 @@ class MainWindow(QMainWindow):
         a_perf.triggered.connect(self._toggle_performance)
         v.addAction(a_perf)
 
+        s = mb.addMenu("&Settings")
+        a_settings = QAction("Show Settings…", self)
+        a_settings.setShortcut("Ctrl+,")
+        a_settings.triggered.connect(self._open_settings)
+        s.addAction(a_settings)
+
     # ── tick ────
     def _on_tick(self):
         hms = now_hms()
@@ -442,7 +516,9 @@ class MainWindow(QMainWindow):
 
         ph = resolve(self._show, now_seconds_of_day())
         self._update_cards(ph)
-        self._scenes_panel.set_scenes(self._show.scenes, ph.current_scene_index)
+        # Light-weight: just re-styles existing rows, doesn't touch editable
+        # cells or rebuild the table (won't interrupt inline edits).
+        self._scenes_panel.mark_active(ph.current_scene_index)
 
         cur_row = None
         if ph.current_cue and ph.current_cue.scene_index == self._active_scene_row:
@@ -463,6 +539,25 @@ class MainWindow(QMainWindow):
             self._perf_view.set_drift(drift_state["drift"], self._show.settings.drift_warning_seconds)
             self._perf_view.show_current(cur_scene.name if cur_scene else "", cur_cue)
             self._perf_view.show_next(nxt_cue, ph.countdown())
+
+    def _open_settings(self):
+        dlg = SettingsDialog(self._show.settings, self)
+        if dlg.exec():
+            new = dlg.get_settings()
+            if new is not None:
+                self._show.settings = new
+                self._apply_settings()
+                self._mark_dirty()
+
+    def _apply_settings(self):
+        """Push settings changes into all widgets that care about them."""
+        s = self._show.settings
+        # Re-render cue cards so operator list changes show up immediately.
+        # Scene panel and cue table rebuilds happen via _reload_scenes.
+        if self._perf_view is not None:
+            self._perf_view.apply_settings(s)
+            self._perf_view.set_operators(s.operator_names)
+        self._reload_scenes()
 
     def _toggle_performance(self):
         if self._perf_view is not None:
@@ -487,13 +582,10 @@ class MainWindow(QMainWindow):
         self._table.load_cues(self._show.scenes[row].cues, self._show.settings.operator_names)
 
     def _on_scene_add(self):
-        name, ok = QInputDialog.getText(self, "New scene", "Scene name:")
-        if not ok:
-            return
-        start, ok2 = QInputDialog.getText(self, "Start time", "HH:MM:SS:", text=now_hms())
-        if not ok2:
-            return
-        self._show.scenes.append(Scene(name=name.strip() or "Scene", start_time=start.strip() or "00:00:00"))
+        # Direct append with sensible defaults — the user edits fields inline
+        # in the table rather than going through a modal dialog.
+        default_name = f"Scene {len(self._show.scenes) + 1}"
+        self._show.scenes.append(Scene(name=default_name, start_time=now_hms()))
         self._active_scene_row = len(self._show.scenes) - 1
         self._reload_scenes()
         self._mark_dirty()
@@ -509,20 +601,22 @@ class MainWindow(QMainWindow):
         self._reload_scenes()
         self._mark_dirty()
 
-    def _on_scene_renamed(self, row: int, name: str, start: str):
+    def _on_scene_field_changed(self, row: int, field: str, value: str):
         if not (0 <= row < len(self._show.scenes)):
             return
         sc = self._show.scenes[row]
-        sc.name = name
-        if start:
-            sc.start_time = start
-        self._reload_scenes()
+        if field == "name":
+            sc.name = value
+        elif field == "start_time":
+            sc.start_time = value
+        elif field == "time_source":
+            sc.time_source = value
         self._mark_dirty()
 
     def _reload_scenes(self):
         self._scenes_panel.set_scenes(self._show.scenes)
         if self._show.scenes:
-            self._scenes_panel._list.setCurrentRow(self._active_scene_row)
+            self._scenes_panel.select_row(self._active_scene_row)
             self._table.load_cues(
                 self._show.scenes[self._active_scene_row].cues,
                 self._show.settings.operator_names,

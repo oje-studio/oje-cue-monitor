@@ -7,8 +7,28 @@ import logging
 import os
 import sys
 
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QColor, QIcon, QPalette
 from PyQt6.QtWidgets import QApplication
+
+
+def _apply_dark_palette(app: QApplication):
+    """Match the CUE MONITOR's dark palette so both apps feel identical."""
+    p = QPalette()
+    p.setColor(QPalette.ColorRole.Window,          QColor(28, 28, 28))
+    p.setColor(QPalette.ColorRole.WindowText,      QColor(218, 218, 218))
+    p.setColor(QPalette.ColorRole.Base,            QColor(35, 35, 35))
+    p.setColor(QPalette.ColorRole.AlternateBase,   QColor(42, 42, 42))
+    p.setColor(QPalette.ColorRole.ToolTipBase,     QColor(42, 42, 42))
+    p.setColor(QPalette.ColorRole.ToolTipText,     QColor(218, 218, 218))
+    p.setColor(QPalette.ColorRole.Text,            QColor(218, 218, 218))
+    p.setColor(QPalette.ColorRole.Button,          QColor(42, 42, 42))
+    p.setColor(QPalette.ColorRole.ButtonText,      QColor(218, 218, 218))
+    p.setColor(QPalette.ColorRole.BrightText,      QColor(255, 90, 90))
+    p.setColor(QPalette.ColorRole.Highlight,       QColor(55, 115, 195))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    p.setColor(QPalette.ColorRole.Mid,             QColor(58, 58, 58))
+    p.setColor(QPalette.ColorRole.Dark,            QColor(18, 18, 18))
+    app.setPalette(p)
 
 from . import APP_NAME, VERSION
 
@@ -46,6 +66,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(VERSION)
+    _apply_dark_palette(app)
 
     # App icon (shared with the classic CUE MONITOR for now)
     # Try platform-specific icon, fall back to PNG.

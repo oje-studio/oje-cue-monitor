@@ -13,6 +13,24 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 
+# Time source for a scene — determines which clock drives cue firing.
+# Currently the engine only resolves `world_clock` (real wall clock);
+# `ltc` and `manual` are stored but will gain runtime support in later
+# commits. They're defined here so the data model is forward-compatible
+# and the UI can expose the choice today.
+TIME_SOURCE_WORLD = "world_clock"
+TIME_SOURCE_LTC   = "ltc"
+TIME_SOURCE_MANUAL = "manual"
+
+TIME_SOURCES = (TIME_SOURCE_WORLD, TIME_SOURCE_LTC, TIME_SOURCE_MANUAL)
+
+TIME_SOURCE_LABELS = {
+    TIME_SOURCE_WORLD:  "World Clock",
+    TIME_SOURCE_LTC:    "LTC",
+    TIME_SOURCE_MANUAL: "Manual",
+}
+
+
 @dataclass
 class SceneCue:
     offset: float = 0.0          # seconds from scene start
@@ -27,6 +45,7 @@ class SceneCue:
 class Scene:
     name: str = ""
     start_time: str = "00:00:00"  # HH:MM:SS wall-clock time
+    time_source: str = TIME_SOURCE_WORLD
     cues: List[SceneCue] = field(default_factory=list)
     id: str = field(default_factory=lambda: uuid4().hex[:12])
 
