@@ -58,6 +58,13 @@ def _mono(size: int) -> QFont:
     return f
 
 
+def _fmt_hms(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
 # ── Top bar with clock + drift indicator ──────────────────────────────────────
 
 class TopBar(QFrame):
@@ -148,8 +155,8 @@ class TopBar(QFrame):
 
 # ── Scenes list ───────────────────────────────────────────────────────────────
 
-SCENE_COL_NAME, SCENE_COL_START, SCENE_COL_SOURCE = 0, 1, 2
-SCENE_HEADERS = ["Scene Name", "Start Time", "Source"]
+SCENE_COL_NAME, SCENE_COL_START, SCENE_COL_SOURCE, SCENE_COL_STATUS = 0, 1, 2, 3
+SCENE_HEADERS = ["Scene Name", "Start Time", "Source", "Status"]
 
 
 class ScenesPanel(QFrame):
@@ -161,6 +168,7 @@ class ScenesPanel(QFrame):
     scene_selected = pyqtSignal(int)
     scene_add = pyqtSignal()
     scene_remove = pyqtSignal(int)
+    scene_start_now = pyqtSignal(int)
     scene_field_changed = pyqtSignal(int, str, str)  # row, field, value
 
     def __init__(self, parent=None):
@@ -193,6 +201,7 @@ class ScenesPanel(QFrame):
         hh.setSectionResizeMode(SCENE_COL_NAME, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(SCENE_COL_START, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(SCENE_COL_SOURCE, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(SCENE_COL_STATUS, QHeaderView.ResizeMode.ResizeToContents)
 
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -223,10 +232,14 @@ class ScenesPanel(QFrame):
             start_item.setFont(_mono(11))
             src_item = QTableWidgetItem("")
             src_item.setFlags(src_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            status_item = QTableWidgetItem("")
+            status_item.setFont(_mono(10))
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
 
             self._table.setItem(i, SCENE_COL_NAME, name_item)
             self._table.setItem(i, SCENE_COL_START, start_item)
             self._table.setItem(i, SCENE_COL_SOURCE, src_item)
+            self._table.setItem(i, SCENE_COL_STATUS, status_item)
 
             combo = QComboBox()
             for src in TIME_SOURCES:
@@ -256,6 +269,17 @@ class ScenesPanel(QFrame):
                     continue
                 it.setForeground(QColor(ACCENT_GREEN) if is_active else QColor(TEXT_BRIGHT))
                 f = it.font(); f.setBold(is_active); it.setFont(f)
+
+    def update_statuses(self, statuses):
+        """statuses: list[(text, color_hex)] one per row."""
+        for row, (text, color) in enumerate(statuses):
+            if row >= self._table.rowCount():
+                break
+            it = self._table.item(row, SCENE_COL_STATUS)
+            if not it:
+                continue
+            it.setText(text)
+            it.setForeground(QColor(color))
 
     def current_row(self) -> int:
         return self._table.currentRow()
@@ -307,10 +331,15 @@ class ScenesPanel(QFrame):
         from PyQt6.QtWidgets import QMenu
         row = self._table.indexAt(pos).row()
         menu = QMenu(self)
+        act_start = menu.addAction("▶  Start Now") if row >= 0 else None
+        if act_start:
+            menu.addSeparator()
         act_add = menu.addAction("Add Scene")
         act_del = menu.addAction("Delete Scene") if row >= 0 else None
         act = menu.exec(self._table.viewport().mapToGlobal(pos))
-        if act is act_add:
+        if act_start is not None and act is act_start:
+            self.scene_start_now.emit(row)
+        elif act is act_add:
             self.scene_add.emit()
         elif act_del is not None and act is act_del:
             self.scene_remove.emit(row)
@@ -592,6 +621,7 @@ class MainWindow(QMainWindow):
         self._scenes_panel.scene_selected.connect(self._on_scene_selected)
         self._scenes_panel.scene_add.connect(self._on_scene_add)
         self._scenes_panel.scene_remove.connect(self._on_scene_remove)
+        self._scenes_panel.scene_start_now.connect(self._on_scene_start_now)
         self._scenes_panel.scene_field_changed.connect(self._on_scene_field_changed)
         splitter.addWidget(self._scenes_panel)
 
@@ -718,15 +748,13 @@ class MainWindow(QMainWindow):
             self._ltc.level_db(),
         )
 
-        ctx = TimeContext(
-            world=now_seconds_of_day(),
-            ltc=self._ltc.current_seconds(),
-        )
+        ctx = self._current_time_context()
         ph = resolve(self._show, ctx)
         self._update_cards(ph)
         # Light-weight: just re-styles existing rows, doesn't touch editable
         # cells or rebuild the table (won't interrupt inline edits).
         self._scenes_panel.mark_active(ph.current_scene_index)
+        self._scenes_panel.update_statuses(self._compute_scene_statuses(ctx, ph))
 
         cur_row = None
         if ph.current_cue and ph.current_cue.scene_index == self._active_scene_row:
@@ -760,14 +788,24 @@ class MainWindow(QMainWindow):
     def _apply_settings(self):
         """Push settings changes into all widgets that care about them."""
         s = self._show.settings
+        # Save cue selection before _reload_scenes wipes it, so we can
+        # re-show the operator panel for the same cue afterwards — otherwise
+        # adding an operator and closing Settings looks like "my new field
+        # didn't appear".
+        prev_cue_row = self._table.currentRow()
+
         self._op_panel.set_operators(s.operator_names)
-        self._op_panel.hide_panel()
         self._topbar.set_logo(s.logo_path)
         if self._perf_view is not None:
             self._perf_view.apply_settings(s)
             self._perf_view.set_operators(s.operator_names)
             self._perf_view.set_logo(s.logo_path)
         self._reload_scenes()
+
+        sc = self._current_scene()
+        if sc is not None and 0 <= prev_cue_row < len(sc.cues):
+            self._table.setCurrentCell(prev_cue_row, 1)
+            self._on_cue_selected(prev_cue_row)
         # Restart LTC with the current settings — only if the show actually
         # has a scene that wants LTC, otherwise keep it off to avoid grabbing
         # the audio device unnecessarily.
@@ -861,6 +899,60 @@ class MainWindow(QMainWindow):
         self._reload_scenes()
         self._sync_ltc()
         self._mark_dirty()
+
+    def _on_scene_start_now(self, row: int):
+        """
+        Set the scene's start_time to the current value of its time source.
+        Makes the scene active immediately (the engine picks it up on the
+        next tick).
+        """
+        if not (0 <= row < len(self._show.scenes)):
+            return
+        sc = self._show.scenes[row]
+        ctx = self._current_time_context()
+        now_sec = ctx.for_source(sc.time_source)
+        if now_sec is None:
+            QMessageBox.warning(
+                self, "No time source",
+                f"Cannot start — the source '{sc.time_source}' has no current value.\n\n"
+                f"Check the source is live (LTC signal, etc.).",
+            )
+            return
+        now_sec = int(now_sec)
+        h = now_sec // 3600
+        m = (now_sec % 3600) // 60
+        s = now_sec % 60
+        sc.start_time = f"{h:02d}:{m:02d}:{s:02d}"
+        self._reload_scenes()
+        self._mark_dirty()
+
+    def _current_time_context(self) -> TimeContext:
+        return TimeContext(
+            world=now_seconds_of_day(),
+            ltc=self._ltc.current_seconds(),
+        )
+
+    def _compute_scene_statuses(self, ctx: TimeContext, ph):
+        """Return list of (text, color_hex) one per scene for the status column."""
+        out = []
+        for i, sc in enumerate(self._show.scenes):
+            src_t = ctx.for_source(sc.time_source)
+            sc_start = sc.start_seconds()
+            if src_t is None:
+                out.append(("— no source", TEXT_DIM))
+                continue
+            if sc_start is None:
+                out.append(("bad start", ACCENT_RED))
+                continue
+            if i == ph.current_scene_index:
+                elapsed = int(src_t - sc_start)
+                out.append((f"▶ {_fmt_hms(elapsed)}", ACCENT_GREEN))
+            elif src_t < sc_start:
+                wait = int(sc_start - src_t)
+                out.append((f"in {_fmt_hms(wait)}", TEXT_DIM))
+            else:
+                out.append(("ended", TEXT_DIM))
+        return out
 
     def _on_scene_field_changed(self, row: int, field: str, value: str):
         if not (0 <= row < len(self._show.scenes)):
