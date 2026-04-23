@@ -27,6 +27,7 @@ from ..engine import Playhead, resolve
 from ..scene_model import Scene, SceneCue, Show, ShowSettings, format_offset, parse_offset
 from ..show_file import load_show, save_show
 from ..world_clock import DriftMonitor, now_hms, now_seconds_of_day
+from .performance_view import PerformanceView
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +343,8 @@ class MainWindow(QMainWindow):
         self._drift = DriftMonitor()
         self._drift.start()
 
+        self._perf_view: Optional[PerformanceView] = None
+
         # ── Layout ────
         central = QWidget()
         outer = QVBoxLayout(central)
@@ -423,6 +426,12 @@ class MainWindow(QMainWindow):
         a_save_as.triggered.connect(self._on_save_as)
         f.addAction(a_save_as)
 
+        v = mb.addMenu("&View")
+        a_perf = QAction("Performance Mode", self)
+        a_perf.setShortcut("P")
+        a_perf.triggered.connect(self._toggle_performance)
+        v.addAction(a_perf)
+
     # ── tick ────
     def _on_tick(self):
         hms = now_hms()
@@ -442,10 +451,33 @@ class MainWindow(QMainWindow):
 
     def _update_cards(self, ph: Playhead):
         ops = self._show.settings.operator_names
+        cur_scene = ph.current_cue.resolve(self._show)[0] if ph.current_cue else None
         cur_cue = ph.current_cue.resolve(self._show)[1] if ph.current_cue else None
         nxt_cue = ph.next_cue.resolve(self._show)[1] if ph.next_cue else None
         self._current_card.show_cue(cur_cue, ops)
         self._next_card.show_cue(nxt_cue, ops, ph.countdown())
+
+        if self._perf_view is not None:
+            self._perf_view.set_time(now_hms())
+            drift_state = self._drift.state()
+            self._perf_view.set_drift(drift_state["drift"], self._show.settings.drift_warning_seconds)
+            self._perf_view.show_current(cur_scene.name if cur_scene else "", cur_cue)
+            self._perf_view.show_next(nxt_cue, ph.countdown())
+
+    def _toggle_performance(self):
+        if self._perf_view is not None:
+            self._perf_view.close()
+            self._perf_view = None
+            return
+        self._perf_view = PerformanceView()
+        self._perf_view.apply_settings(self._show.settings)
+        self._perf_view.set_operators(self._show.settings.operator_names)
+        self._perf_view.setWindowTitle(f"{APP_NAME} — Performance")
+        self._perf_view.destroyed.connect(self._on_perf_closed)
+        self._perf_view.showFullScreen()
+
+    def _on_perf_closed(self):
+        self._perf_view = None
 
     # ── scene handlers ────
     def _on_scene_selected(self, row: int):
