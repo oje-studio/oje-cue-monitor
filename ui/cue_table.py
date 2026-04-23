@@ -189,7 +189,11 @@ class TimecodePopup(QFrame):
         if self._applied:
             return
         self._applied = True
-        val = self._edit.text().replace(" ", "")
+        # Use displayText() not text(): with blank char '0', text() strips
+        # typed zeros (can't distinguish them from unfilled positions), so
+        # e.g. "10:00:00:00" comes back as "1:::". displayText() preserves
+        # the visible value with blanks filled in.
+        val = self._edit.displayText()
         parts = val.split(":")
         if len(parts) != 4:
             return
