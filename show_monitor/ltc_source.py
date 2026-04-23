@@ -30,6 +30,7 @@ class LTCSource:
         self._last_fps: float = 25.0
         self._last_msg_time: float = 0.0
         self._last_error: Optional[str] = None
+        self._last_level_db: float = -120.0
 
     # ── lifecycle ────
     def start(self, device_index: Optional[int], channel_index: int) -> Optional[str]:
@@ -84,6 +85,8 @@ class LTCSource:
                     self._last_tc = (h, m, s, f)
                     self._last_fps = fps
                     self._last_msg_time = time.time()
+                elif kind == "level":
+                    self._last_level_db = float(msg[1])
                 elif kind == "error":
                     self._last_error = msg[1] if len(msg) > 1 else "LTC error"
                     events.append(msg)
@@ -116,6 +119,9 @@ class LTCSource:
 
     def fps(self) -> float:
         return self._last_fps
+
+    def level_db(self) -> float:
+        return self._last_level_db
 
     def last_error(self) -> Optional[str]:
         return self._last_error

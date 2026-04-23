@@ -14,7 +14,7 @@ import os
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QFont, QKeySequence
+from PyQt6.QtGui import QAction, QColor, QFont, QKeySequence, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenuBar, QMessageBox,
@@ -32,7 +32,7 @@ from ..show_file import load_show, save_show
 from ..world_clock import DriftMonitor, now_hms, now_seconds_of_day
 from .performance_view import PerformanceView
 from .settings_dialog import SettingsDialog
-from .widgets import OperatorEditPanel, TimecodePopup
+from .widgets import ColorDelegate, OperatorEditPanel, TimecodePopup, VUMeter, named_bg
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,11 @@ class TopBar(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 8, 16, 8)
 
+        self.logo = QLabel()
+        self.logo.setFixedHeight(40)
+        self.logo.setVisible(False)
+        lay.addWidget(self.logo)
+
         title = QLabel(f"{APP_NAME}  {VERSION}")
         title.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; letter-spacing: 2px;")
         lay.addWidget(title)
@@ -83,11 +88,18 @@ class TopBar(QFrame):
         self.clock.setStyleSheet(f"color: {TEXT_BRIGHT};")
         clock_col.addWidget(self.clock)
 
+        ltc_row = QHBoxLayout()
+        ltc_row.setSpacing(6)
+        ltc_row.addStretch()
+        self.vu = VUMeter()
+        self.vu.setVisible(False)  # only shown when LTC decoder is running
+        ltc_row.addWidget(self.vu)
         self.ltc = QLabel("LTC  --:--:--:--")
         self.ltc.setFont(_mono(12))
-        self.ltc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ltc.setStyleSheet(f"color: {TEXT_DIM};")
-        clock_col.addWidget(self.ltc)
+        ltc_row.addWidget(self.ltc)
+        ltc_row.addStretch()
+        clock_col.addLayout(ltc_row)
         lay.addLayout(clock_col)
 
         lay.addStretch()
@@ -110,11 +122,24 @@ class TopBar(QFrame):
         self.drift.setText(f"NTP drift: {sign}{abs(drift):.2f}s")
         self.drift.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
 
-    def set_ltc(self, tc: str, has_signal: bool, running: bool):
+    def set_logo(self, path: str):
+        if not path or not os.path.exists(path):
+            self.logo.setVisible(False)
+            return
+        pix = QPixmap(path)
+        if pix.isNull():
+            self.logo.setVisible(False)
+            return
+        self.logo.setPixmap(pix.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation))
+        self.logo.setVisible(True)
+
+    def set_ltc(self, tc: str, has_signal: bool, running: bool, db: float = -120.0):
+        self.vu.setVisible(running)
         if not running:
             self.ltc.setText("LTC  off")
             self.ltc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 11px;")
             return
+        self.vu.set_db(db)
         color = ACCENT_GREEN if has_signal else ACCENT_RED
         label = "LTC" if has_signal else "LTC  no signal"
         self.ltc.setText(f"{label}  {tc}" if has_signal else label)
@@ -298,8 +323,8 @@ class ScenesPanel(QFrame):
 
 # ── Cue table ─────────────────────────────────────────────────────────────────
 
-COL_OFFSET, COL_NAME, COL_DESC, COL_OPS = 0, 1, 2, 3
-COL_HEADERS = ["Offset", "Name", "Description", "Operator notes"]
+COL_OFFSET, COL_NAME, COL_DESC, COL_COLOR, COL_OPS = 0, 1, 2, 3, 4
+COL_HEADERS = ["Offset", "Name", "Description", "Color", "Operator notes"]
 
 
 class CueTable(QTableWidget):
@@ -324,11 +349,15 @@ class CueTable(QTableWidget):
         self.horizontalHeader().setSectionResizeMode(COL_OFFSET, QHeaderView.ResizeMode.ResizeToContents)
         self.horizontalHeader().setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Interactive)
         self.horizontalHeader().setSectionResizeMode(COL_DESC, QHeaderView.ResizeMode.Stretch)
+        self.horizontalHeader().setSectionResizeMode(COL_COLOR, QHeaderView.ResizeMode.Fixed)
+        self.setColumnWidth(COL_COLOR, 90)
         self.horizontalHeader().setSectionResizeMode(COL_OPS, QHeaderView.ResizeMode.Interactive)
         self.setColumnWidth(COL_NAME, 200)
         self.setColumnWidth(COL_OPS, 240)
+        self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
 
         self._cues: list = []
+        self._duplicate_rows: set = set()
         self._current_cue_row: Optional[int] = None
         self.itemChanged.connect(self._on_item_changed)
         self.cellDoubleClicked.connect(self._on_cell_dbl)
@@ -387,17 +416,35 @@ class CueTable(QTableWidget):
 
     def load_cues(self, cues, operator_names):
         self._cues = cues
+        # Duplicate offsets within the same scene — CUE MONITOR warns about
+        # duplicate timecodes, we warn about duplicate offsets for the same
+        # reason: only the last cue in the group will actually fire.
+        from collections import Counter
+        offset_counts = Counter(float(c.offset) for c in cues)
+        self._duplicate_rows = {
+            i for i, c in enumerate(cues)
+            if offset_counts[float(c.offset)] > 1
+        }
+
         self.blockSignals(True)
         self.setRowCount(len(cues))
         for row, cue in enumerate(cues):
             self._set_item(row, COL_OFFSET, format_offset(cue.offset), mono=True)
             self._set_item(row, COL_NAME, cue.name)
             self._set_item(row, COL_DESC, cue.description)
+            self._set_item(row, COL_COLOR, cue.color)
             op_text = ", ".join(
                 f"{n}: {cue.operator_comments[n]}"
                 for n in operator_names if cue.operator_comments.get(n)
             )
             self._set_item(row, COL_OPS, op_text)
+
+            if row in self._duplicate_rows:
+                off_item = self.item(row, COL_OFFSET)
+                if off_item:
+                    off_item.setToolTip(
+                        "Duplicate offset — only the last cue at this time will fire."
+                    )
         self.blockSignals(False)
         self._apply_highlight()
 
@@ -406,15 +453,22 @@ class CueTable(QTableWidget):
         self._apply_highlight()
 
     def _apply_highlight(self):
+        dup_bg = QColor(140, 100, 20)
+        cur_bg = QColor(55, 130, 55)
+        normal_bg = QColor(DARK_BG)
         for r in range(self.rowCount()):
+            cue = self._cues[r] if r < len(self._cues) else None
+            custom = named_bg(cue.color) if cue and cue.color else None
             for c in range(self.columnCount()):
                 it = self.item(r, c)
-                if not it:
+                if not it or c == COL_COLOR:
                     continue
                 if r == self._current_cue_row:
-                    it.setBackground(QColor(50, 80, 50))
+                    it.setBackground(custom if custom else cur_bg)
+                elif r in self._duplicate_rows and c == COL_OFFSET:
+                    it.setBackground(dup_bg)
                 else:
-                    it.setBackground(QColor(DARK_BG))
+                    it.setBackground(custom.darker(220) if custom else normal_bg)
 
     def _set_item(self, row, col, text, mono=False):
         it = QTableWidgetItem(text or "")
@@ -434,6 +488,8 @@ class CueTable(QTableWidget):
             self.cue_changed.emit(row, "name", text)
         elif col == COL_DESC:
             self.cue_changed.emit(row, "description", text)
+        elif col == COL_COLOR:
+            self.cue_changed.emit(row, "color", text)
 
 
 # ── Current / Next card ───────────────────────────────────────────────────────
@@ -623,6 +679,27 @@ class MainWindow(QMainWindow):
         a_settings.triggered.connect(self._open_settings)
         s.addAction(a_settings)
 
+        # Hidden actions — not in any menu, just bound to shortcuts.
+        a_add_cue = QAction(self)
+        a_add_cue.setShortcut(QKeySequence("Ctrl+Return"))
+        a_add_cue.triggered.connect(self._on_cue_add)
+        self.addAction(a_add_cue)
+
+        a_dup_cue = QAction(self)
+        a_dup_cue.setShortcut(QKeySequence("Ctrl+D"))
+        a_dup_cue.triggered.connect(self._shortcut_duplicate_cue)
+        self.addAction(a_dup_cue)
+
+        a_del_cue = QAction(self)
+        a_del_cue.setShortcut(QKeySequence(Qt.Key.Key_Delete))
+        a_del_cue.triggered.connect(self._shortcut_delete_cue)
+        self.addAction(a_del_cue)
+
+        a_jump = QAction(self)
+        a_jump.setShortcut(QKeySequence("Space"))
+        a_jump.triggered.connect(self._shortcut_jump_to_current)
+        self.addAction(a_jump)
+
     # ── tick ────
     def _on_tick(self):
         hms = now_hms()
@@ -638,6 +715,7 @@ class MainWindow(QMainWindow):
             self._ltc.current_tc_string(),
             self._ltc.has_signal(),
             self._ltc.is_running(),
+            self._ltc.level_db(),
         )
 
         ctx = TimeContext(
@@ -684,9 +762,11 @@ class MainWindow(QMainWindow):
         s = self._show.settings
         self._op_panel.set_operators(s.operator_names)
         self._op_panel.hide_panel()
+        self._topbar.set_logo(s.logo_path)
         if self._perf_view is not None:
             self._perf_view.apply_settings(s)
             self._perf_view.set_operators(s.operator_names)
+            self._perf_view.set_logo(s.logo_path)
         self._reload_scenes()
         # Restart LTC with the current settings — only if the show actually
         # has a scene that wants LTC, otherwise keep it off to avoid grabbing
@@ -745,6 +825,7 @@ class MainWindow(QMainWindow):
         self._perf_view = PerformanceView()
         self._perf_view.apply_settings(self._show.settings)
         self._perf_view.set_operators(self._show.settings.operator_names)
+        self._perf_view.set_logo(self._show.settings.logo_path)
         self._perf_view.setWindowTitle(f"{APP_NAME} — Performance")
         self._perf_view.destroyed.connect(self._on_perf_closed)
         self._perf_view.showFullScreen()
@@ -878,6 +959,9 @@ class MainWindow(QMainWindow):
             cue.name = value
         elif field == "description":
             cue.description = value
+        elif field == "color":
+            cue.color = value
+            self._table.load_cues(sc.cues, self._show.settings.operator_names)
         self._mark_dirty()
 
     def _on_cue_selected(self, row: int):
@@ -886,6 +970,20 @@ class MainWindow(QMainWindow):
             self._op_panel.hide_panel()
             return
         self._op_panel.show_for_cue(row, sc.cues[row].operator_comments)
+
+    def _shortcut_duplicate_cue(self):
+        row = self._table.currentRow()
+        if row >= 0:
+            self._on_cue_duplicate(row)
+
+    def _shortcut_delete_cue(self):
+        row = self._table.currentRow()
+        if row >= 0:
+            self._on_cue_delete_row(row)
+
+    def _shortcut_jump_to_current(self):
+        if self._table._current_cue_row is not None:
+            self._table.setCurrentCell(self._table._current_cue_row, 1)
 
     def _on_operator_changed(self, row: int, op_name: str, comment: str):
         sc = self._current_scene()
@@ -906,7 +1004,7 @@ class MainWindow(QMainWindow):
         self._show = Show()
         self._file_path = None
         self._active_scene_row = 0
-        self._reload_scenes()
+        self._apply_settings()
         self._sync_ltc()
         self._dirty = False
         self._update_title()
@@ -926,7 +1024,7 @@ class MainWindow(QMainWindow):
             return
         self._file_path = path
         self._active_scene_row = 0
-        self._reload_scenes()
+        self._apply_settings()
         self._sync_ltc()
         self._dirty = False
         self._update_title()

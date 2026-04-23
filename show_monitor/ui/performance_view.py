@@ -9,10 +9,11 @@ running show, so legibility beats decoration.
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QKeyEvent
+from PyQt6.QtGui import QFont, QKeyEvent, QPixmap
 from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
@@ -74,9 +75,14 @@ class PerformanceView(QWidget):
         self._outer.setContentsMargins(40, 24, 40, 24)
         self._outer.setSpacing(16)
 
-        # ── Top: large clock + drift ─────────────
+        # ── Top: logo + large clock + drift ─────────────
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
+
+        self._logo = QLabel()
+        self._logo.setFixedHeight(72)
+        self._logo.setVisible(False)
+        top_row.addWidget(self._logo, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         self._clock = QLabel("--:--:--")
         self._clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -169,6 +175,17 @@ class PerformanceView(QWidget):
             )
             self._op_cards.append(card)
             self._ops_lay.addWidget(card, i // cols, i % cols)
+
+    def set_logo(self, path: str):
+        if not path or not os.path.exists(path):
+            self._logo.setVisible(False)
+            return
+        pix = QPixmap(path)
+        if pix.isNull():
+            self._logo.setVisible(False)
+            return
+        self._logo.setPixmap(pix.scaledToHeight(72, Qt.TransformationMode.SmoothTransformation))
+        self._logo.setVisible(True)
 
     def set_time(self, hms: str):
         self._clock.setText(hms)

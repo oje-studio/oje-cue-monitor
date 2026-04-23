@@ -18,13 +18,144 @@ OperatorEditPanel:
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QModelIndex, QRect, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QStyledItemDelegate,
+    QStyleOptionViewItem, QVBoxLayout, QWidget,
 )
+
+
+# ── Colour palette — identical set/names as CUE MONITOR ──────────────────────
+
+COLOR_PALETTE: List[Tuple[str, QColor]] = [
+    ("",           QColor(0, 0, 0, 0)),
+    ("red",        QColor(175, 48, 48)),
+    ("dark red",   QColor(120, 25, 25)),
+    ("orange",     QColor(195, 105, 38)),
+    ("amber",      QColor(210, 160, 30)),
+    ("yellow",     QColor(175, 155, 38)),
+    ("lime",       QColor(95, 180, 45)),
+    ("green",      QColor(48, 155, 75)),
+    ("dark green", QColor(30, 100, 50)),
+    ("teal",       QColor(38, 140, 130)),
+    ("cyan",       QColor(48, 165, 175)),
+    ("sky",        QColor(70, 145, 210)),
+    ("blue",       QColor(48, 95, 175)),
+    ("dark blue",  QColor(35, 55, 130)),
+    ("indigo",     QColor(75, 55, 160)),
+    ("purple",     QColor(125, 55, 175)),
+    ("magenta",    QColor(165, 50, 140)),
+    ("pink",       QColor(195, 95, 155)),
+    ("rose",       QColor(190, 70, 90)),
+    ("white",      QColor(200, 200, 200)),
+    ("grey",       QColor(110, 110, 110)),
+]
+NAMED_COLORS = {name: color for name, color in COLOR_PALETTE if name}
+
+
+def named_bg(name: str) -> Optional[QColor]:
+    return NAMED_COLORS.get((name or "").lower().strip())
+
+
+def _color_icon(color: QColor, size: int = 16) -> QIcon:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QBrush(color))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawRoundedRect(1, 1, size - 2, size - 2, 3, 3)
+    p.end()
+    return QIcon(pm)
+
+
+class VUMeter(QWidget):
+    """5-bar LED-style VU meter. Input is dBFS (-120 .. 0)."""
+
+    BARS = 5
+    ACCENT_GREEN  = QColor(75, 195, 115)
+    ACCENT_ORANGE = QColor(225, 135, 48)
+    ACCENT_RED    = QColor(215, 75, 75)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._db = -120.0
+        self.setFixedSize(62, 20)
+
+    def set_db(self, db: float):
+        self._db = db
+        self.update()
+
+    def paintEvent(self, _):
+        painter = QPainter(self)
+        W, H = self.width(), self.height()
+        bw = (W - (self.BARS - 1) * 2) // self.BARS
+        norm = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
+        lit = int(norm * self.BARS)
+        for i in range(self.BARS):
+            x = i * (bw + 2)
+            if i >= self.BARS - 1:
+                c = self.ACCENT_RED if i < lit else QColor(60, 20, 20)
+            elif i >= self.BARS - 2:
+                c = self.ACCENT_ORANGE if i < lit else QColor(55, 40, 15)
+            else:
+                c = self.ACCENT_GREEN if i < lit else QColor(25, 55, 35)
+            painter.fillRect(x, 2, bw, H - 4, c)
+        painter.end()
+
+
+class ColorDelegate(QStyledItemDelegate):
+    """Renders a color swatch + label and opens a combobox editor on activation."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        name = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        color = named_bg(name)
+        painter.save()
+        if color:
+            rect = QRect(option.rect.x() + 4, option.rect.y() + 4,
+                         option.rect.width() - 8, option.rect.height() - 8)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setPen(QColor(255, 255, 255, 200))
+            f = QFont(); f.setPointSize(10)
+            painter.setFont(f)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, name)
+        else:
+            painter.setPen(QColor(80, 80, 80))
+            painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, "—")
+        painter.restore()
+
+    def createEditor(self, parent, option, index):
+        combo = QComboBox(parent)
+        combo.setStyleSheet(
+            "QComboBox { background: #2a2a2a; color: #dcdcdc; border: 1px solid #555; }"
+            "QComboBox QAbstractItemView { background: #2a2a2a; color: #dcdcdc; }"
+        )
+        for name, color in COLOR_PALETTE:
+            if name:
+                combo.addItem(_color_icon(color, 14), f"  {name}", name)
+            else:
+                combo.addItem("  (none)", "")
+        combo.currentIndexChanged.connect(lambda: self.commitData.emit(combo))
+        combo.currentIndexChanged.connect(
+            lambda: self.closeEditor.emit(combo, QStyledItemDelegate.EndEditHint.NoHint))
+        return combo
+
+    def setEditorData(self, editor: QComboBox, index):
+        val = (index.data(Qt.ItemDataRole.DisplayRole) or "").strip().lower()
+        for i in range(editor.count()):
+            if editor.itemData(i) == val:
+                editor.setCurrentIndex(i)
+                return
+        editor.setCurrentIndex(0)
+
+    def setModelData(self, editor: QComboBox, model, index):
+        model.setData(index, editor.currentData() or "", Qt.ItemDataRole.EditRole)
 
 
 def mono_font(size: int = 13) -> QFont:

@@ -13,9 +13,9 @@ from typing import List, Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFormLayout,
-    QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ..scene_model import ShowSettings
@@ -41,6 +41,21 @@ class SettingsDialog(QDialog):
         lay = QVBoxLayout(content)
         lay.setSpacing(16)
         lay.setContentsMargins(8, 8, 8, 8)
+
+        # ── Logo ────
+        grp_logo = QGroupBox("Studio Logo")
+        ll = QHBoxLayout(grp_logo)
+        self._logo_path = settings.logo_path or ""
+        self._logo_lbl = QLabel(self._logo_path or "(none)")
+        self._logo_lbl.setStyleSheet("color: #aaa; font-size: 11px;")
+        ll.addWidget(self._logo_lbl, stretch=1)
+        btn_pick = QPushButton("Choose…")
+        btn_pick.clicked.connect(self._pick_logo)
+        ll.addWidget(btn_pick)
+        btn_clear = QPushButton("Clear")
+        btn_clear.clicked.connect(self._clear_logo)
+        ll.addWidget(btn_clear)
+        lay.addWidget(grp_logo)
 
         # ── Audio (LTC) ────
         grp_audio = QGroupBox("Audio Input (LTC)")
@@ -226,6 +241,18 @@ class SettingsDialog(QDialog):
             self._clock_color = col.name()
             self._refresh_swatch()
 
+    def _pick_logo(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Logo", "", "Images (*.png *.jpg *.jpeg *.svg);;All Files (*)",
+        )
+        if path:
+            self._logo_path = path
+            self._logo_lbl.setText(path)
+
+    def _clear_logo(self):
+        self._logo_path = ""
+        self._logo_lbl.setText("(none)")
+
     def _apply(self):
         op_names = [e.text().strip() for e in self._op_edits if e.text().strip()]
         if not op_names:
@@ -244,7 +271,7 @@ class SettingsDialog(QDialog):
             perf_operator_name_size=self._spin_op_name_size.value(),
             perf_next_name_size=self._spin_next_name.value(),
             perf_next_desc_size=self._spin_next_desc.value(),
-            logo_path=self._settings.logo_path,
+            logo_path=self._logo_path,
         )
         self.accept()
 
