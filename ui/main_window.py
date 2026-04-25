@@ -732,15 +732,15 @@ class MainWindow(QMainWindow):
     def _build_pdf_html(self) -> str:
         operator_names = list(self._show_settings.operator_names or [])
         show_name = self._current_show_title()
-
-        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cue_count = sum(1 for c in self._engine.cues if not c.is_divider)
 
         rows = []
         for cue in self._engine.cues:
             if cue.is_divider:
                 rows.append(
                     "<tr class='section'>"
-                    f"<td colspan='5'>{html.escape(cue.name or 'SECTION')}</td>"
+                    f"<td colspan='4'>{html.escape(cue.name or 'SECTION')}</td>"
                     "</tr>"
                 )
                 continue
@@ -750,31 +750,39 @@ class MainWindow(QMainWindow):
                 comment = cue.operator_comments.get(op_name, "")
                 if comment:
                     notes_parts.append(
-                        f"<div class='note'><span class='note-name'>{html.escape(op_name)}</span><br>"
-                        f"{html.escape(comment).replace(chr(10), '<br>')}</div>"
+                        f"<div class='note'>"
+                        f"<span class='note-name'>{html.escape(op_name)}</span> "
+                        f"{html.escape(comment).replace(chr(10), '<br>')}"
+                        f"</div>"
                     )
-            notes_html = "".join(notes_parts) if notes_parts else "<span class='muted'>—</span>"
+            notes_html = "".join(notes_parts) or "<span class='muted'>—</span>"
+
             color_name = (cue.color or "").strip()
+            tc_style = ""
             if color_name:
-                color_html = (
-                    f"<span class='swatch' style='background:{html.escape(_pdf_color_hex(color_name))};'></span>"
+                tc_style = (
+                    f" style=\"border-left: 4pt solid "
+                    f"{html.escape(_pdf_color_hex(color_name))};\""
                 )
-            else:
-                color_html = "<span class='muted'>—</span>"
 
             rows.append(
                 "<tr>"
-                f"<td class='tc'>{html.escape(cue.timecode or '')}</td>"
-                f"<td>{html.escape(cue.name or '')}</td>"
-                f"<td>{html.escape(cue.description or '')}</td>"
-                f"<td class='color-cell'>{color_html}</td>"
-                f"<td>{notes_html}</td>"
-                + "</tr>"
+                f"<td class='tc'{tc_style}>{html.escape(cue.timecode or '')}</td>"
+                f"<td class='cue-name'>{html.escape(cue.name or '')}</td>"
+                f"<td class='cue-desc'>{html.escape(cue.description or '')}</td>"
+                f"<td class='cue-notes'>{notes_html}</td>"
+                "</tr>"
             )
 
         if not rows:
-            rows.append("<tr><td colspan='99' class='empty'>No cues in show.</td></tr>")
+            rows.append(
+                "<tr><td colspan='4' class='empty'>No cues in show.</td></tr>"
+            )
 
+        # Notes:
+        # - Body margin = 0; printer.setPageMargins() handles paper margins.
+        # - QTextDocument supports a subset of CSS — keep selectors simple.
+        # - Repeat <thead> on every page (Qt honours this for table prints).
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -783,99 +791,110 @@ class MainWindow(QMainWindow):
 body {{
     font-family: Helvetica, Arial, sans-serif;
     color: #111;
-    font-size: 9.5pt;
-    margin: 40pt 44pt 44pt 44pt;
+    font-size: 10.5pt;
+    margin: 0;
+    padding: 0;
 }}
 h1 {{
-    font-size: 20pt;
-    margin: 0 0 6pt 0;
+    font-size: 22pt;
+    margin: 0 0 4pt 0;
     font-weight: 700;
+    letter-spacing: -0.3pt;
 }}
 .meta {{
     color: #666;
-    font-size: 8.5pt;
-    margin-bottom: 16pt;
+    font-size: 9pt;
+    margin-bottom: 14pt;
+    border-bottom: 1px solid #d8dadf;
+    padding-bottom: 10pt;
 }}
 table {{
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
 }}
-th, td {{
-    border-bottom: 1px solid #e2e4e8;
-    padding: 7pt 8pt;
+th {{
+    background: #f4f5f7;
+    color: #555;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.8pt;
+    text-align: left;
+    padding: 6pt 8pt;
+    border-bottom: 1.5pt solid #c0c3cc;
+}}
+td {{
+    padding: 8pt 8pt;
     text-align: left;
     vertical-align: top;
     word-wrap: break-word;
+    border-bottom: 1px solid #ebecf0;
 }}
-th {{
-    background: #f7f7f8;
-    color: #6a6a6a;
-    border-top: 1px solid #e2e4e8;
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.8pt;
+tr {{
+    page-break-inside: avoid;
 }}
 .tc {{
     white-space: nowrap;
-    font-family: Courier, monospace;
+    font-family: Menlo, Courier, monospace;
+    font-weight: 600;
+    font-size: 10pt;
+    color: #1a1a1a;
 }}
-.section td {{
-    background: #f3f4f7;
-    border-top: 1px solid #d7dbe2;
-    border-bottom: 1px solid #d7dbe2;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.8pt;
-    color: #333;
+.cue-name {{
+    font-weight: 600;
+    color: #1a1a1a;
 }}
-.color-cell {{
-    white-space: nowrap;
-    text-align: center;
+.cue-desc {{
+    color: #444;
 }}
-.swatch {{
-    display: inline-block;
-    width: 12pt;
-    height: 12pt;
-    border-radius: 999px;
-    vertical-align: middle;
-    border: 1px solid rgba(0,0,0,0.14);
-}}
-.note {{
-    margin-bottom: 7pt;
-    padding-bottom: 7pt;
-    border-bottom: 1px solid #f0f1f3;
-}}
-.note:last-child {{
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-}}
-.note-name {{
-    font-weight: bold;
+.cue-notes {{
     color: #222;
 }}
-.muted {{
-    color: #777;
+.section td {{
+    background: #1f2233;
+    color: #ffffff;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1pt;
+    padding: 8pt 10pt;
+    border: 0;
+    page-break-after: avoid;
 }}
+.note {{
+    margin: 0 0 4pt 0;
+    line-height: 1.35;
+}}
+.note:last-child {{ margin-bottom: 0; }}
+.note-name {{
+    font-weight: 700;
+    color: #5a4eaa;
+    font-size: 9pt;
+    letter-spacing: 0.3pt;
+}}
+.muted {{ color: #999; }}
 .empty {{
     color: #666;
     text-align: center;
-    padding: 18pt;
+    padding: 24pt;
+    font-style: italic;
 }}
 </style>
 </head>
 <body>
 <h1>{html.escape(show_name)}</h1>
-<div class="meta">Generated {html.escape(generated_at)} · {html.escape(APP_NAME)} {html.escape(VERSION)}</div>
+<div class="meta">
+{cue_count} cue{'s' if cue_count != 1 else ''} ·
+{len(operator_names)} operator{'s' if len(operator_names) != 1 else ''} ·
+Generated {html.escape(generated_at)} ·
+{html.escape(APP_NAME)} {html.escape(VERSION)}
+</div>
 <table>
 <thead>
 <tr>
-<th style="width: 14%;">Timecode</th>
-<th style="width: 18%;">Cue</th>
-<th style="width: 30%;">Description</th>
-<th style="width: 7%;">Color</th>
-<th style="width: 31%;">Operator Notes</th>
+<th style="width: 16%;">Timecode</th>
+<th style="width: 22%;">Cue</th>
+<th style="width: 28%;">Description</th>
+<th style="width: 34%;">Operator Notes</th>
 </tr>
 </thead>
 <tbody>
@@ -899,6 +918,16 @@ th {{
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(path)
         printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        # Explicit, modest page margins — the body has margin: 0 so paper
+        # margins live entirely on the printer side. Without this the body
+        # margin and Qt's default ~30 mm page margin stacked, leaving the
+        # content cramped in the centre of the page.
+        from PyQt6.QtCore import QMarginsF
+        from PyQt6.QtGui import QPageLayout
+        printer.setPageMargins(
+            QMarginsF(15.0, 15.0, 15.0, 15.0),
+            QPageLayout.Unit.Millimeter,
+        )
 
         doc = QTextDocument()
         doc.setHtml(self._build_pdf_html())
