@@ -75,6 +75,13 @@ class SettingsDialog(QDialog):
 
         lay.addWidget(grp_logo)
 
+        grp_show = QGroupBox("Show")
+        sl = QFormLayout(grp_show)
+        self._show_title_edit = QLineEdit(settings.show_title)
+        self._show_title_edit.setPlaceholderText("Show title for exports and printouts")
+        sl.addRow("Title:", self._show_title_edit)
+        lay.addWidget(grp_show)
+
         # ── Operators ���────────────────────────────────────────────────────────
         grp_ops = QGroupBox("Operators")
         self._ops_lay = QVBoxLayout(grp_ops)
@@ -91,6 +98,17 @@ class SettingsDialog(QDialog):
         self._ops_lay.addLayout(btn_row)
 
         lay.addWidget(grp_ops)
+
+        # ── Web Remote ───────────────────────────────────────────────────────
+        grp_remote = QGroupBox("Web Remote")
+        rl = QFormLayout(grp_remote)
+
+        self._remote_password = QLineEdit(settings.remote_password)
+        self._remote_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self._remote_password.setPlaceholderText("Required on phones / tablets")
+        rl.addRow("Password:", self._remote_password)
+
+        lay.addWidget(grp_remote)
 
         # ── Performance Mode ──────────────────────────────────────────────────
         grp_perf = QGroupBox("Performance Mode — Font Sizes")
@@ -230,18 +248,18 @@ class SettingsDialog(QDialog):
         if logo == "(none)":
             logo = ""
 
-        op_names = [e.text().strip() or e.placeholderText()
-                    for e in self._op_edits if e.text().strip() or True]
-        # Filter out empty
+        op_names = [e.text().strip() for e in self._op_edits]
         op_names = [n for n in op_names if n]
         if not op_names:
             op_names = ["Operator 1"]
 
         self._result_settings = ShowSettings(
+            show_title=self._show_title_edit.text().strip(),
             audio_device_name=self._combo_device.currentData() or "",
             audio_channel=int(self._combo_channel.currentData() or 0),
             logo_path=logo,
             operator_names=op_names,
+            remote_password=self._remote_password.text(),
             perf_cue_name_size=self._spin_cue_name.value(),
             perf_cue_desc_size=self._spin_cue_desc.value(),
             perf_operator_size=self._spin_op_size.value(),

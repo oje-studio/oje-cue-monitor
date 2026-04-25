@@ -203,18 +203,16 @@ class CueEngine:
     # ── queries ───────────────────────────────────────────────────────────────
 
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
-        prev = self._prev_frames
         self._prev_frames = tc_frames
-        if prev >= 0 and tc_frames != prev:
-            lo, hi = min(prev, tc_frames), max(prev, tc_frames)
-            for i, cue in enumerate(self.cues):
-                if cue.is_divider or not cue.has_timecode:
-                    continue
-                if i == self._active_index:
-                    continue
-                if lo <= cue.frames <= hi:
-                    self._active_index = i
-                    break
+        last_match = -1
+        for i, cue in enumerate(self.cues):
+            if cue.is_divider or not cue.has_timecode:
+                continue
+            if cue.frames <= tc_frames:
+                last_match = i
+            else:
+                break
+        self._active_index = last_match
         if 0 <= self._active_index < len(self.cues):
             return self.cues[self._active_index]
         return None
@@ -232,4 +230,7 @@ class CueEngine:
         nxt = self.get_next_cue(tc_frames)
         if nxt is None:
             return None
-        return abs(nxt.frames - tc_frames) / self.fps
+        remaining_frames = nxt.frames - tc_frames
+        if remaining_frames < 0:
+            return None
+        return remaining_frames / self.fps

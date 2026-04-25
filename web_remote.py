@@ -15,6 +15,9 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
+AUTH_COOKIE = "oje_remote_auth"
+OP_COOKIE = "oje_remote_operator"
+
 
 def get_local_ip() -> str:
     """Get the machine's local network IP."""
@@ -61,6 +64,7 @@ class WebRemoteServer:
         self._clients: Set[web.WebSocketResponse] = set()
         self._running = False
         self._operator_names: List[str] = []
+        self._remote_password: str = ""
         self._current_state: Dict = {
             "current_cue": None,
             "next_cue": None,
@@ -76,6 +80,9 @@ class WebRemoteServer:
 
     def set_operators(self, names: List[str]):
         self._operator_names = names
+
+    def set_remote_password(self, password: str):
+        self._remote_password = password or ""
 
     def start(self):
         if self._running:
@@ -125,7 +132,8 @@ class WebRemoteServer:
 
         self._app = web.Application()
         self._app.router.add_get("/", self._handle_index)
-        self._app.router.add_get("/operator/{name}", self._handle_operator)
+        self._app.router.add_post("/auth", self._handle_auth)
+        self._app.router.add_post("/logout", self._handle_logout)
         self._app.router.add_get("/ws", self._handle_ws)
         self._app.router.add_get("/api/state", self._handle_api_state)
 
@@ -145,15 +153,43 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        html = _render_page(None, self._operator_names, self.base_url)
+        operator = request.cookies.get(OP_COOKIE, "")
+        html = _render_page(
+            operator if operator in self._operator_names else "",
+            self._operator_names,
+            self.base_url,
+            authenticated=self._is_authenticated(request),
+            password_required=bool(self._remote_password),
+        )
         return web.Response(text=html, content_type="text/html")
 
-    async def _handle_operator(self, request):
-        name = request.match_info["name"]
-        html = _render_page(name, self._operator_names, self.base_url)
-        return web.Response(text=html, content_type="text/html")
+    async def _handle_auth(self, request):
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "Invalid request."}, status=400)
+
+        password = str(payload.get("password", ""))
+        operator = str(payload.get("operator", ""))
+        if operator and operator not in self._operator_names:
+            return web.json_response({"ok": False, "error": "Unknown operator."}, status=400)
+        if self._remote_password and password != self._remote_password:
+            return web.json_response({"ok": False, "error": "Wrong password."}, status=403)
+
+        resp = web.json_response({"ok": True})
+        resp.set_cookie(AUTH_COOKIE, "1", httponly=False, samesite="Lax")
+        resp.set_cookie(OP_COOKIE, operator, httponly=False, samesite="Lax")
+        return resp
+
+    async def _handle_logout(self, request):
+        resp = web.json_response({"ok": True})
+        resp.del_cookie(AUTH_COOKIE)
+        resp.del_cookie(OP_COOKIE)
+        return resp
 
     async def _handle_ws(self, request):
+        if not self._is_authenticated(request):
+            raise web.HTTPUnauthorized(text="Authentication required.")
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         self._clients.add(ws)
@@ -168,7 +204,12 @@ class WebRemoteServer:
         return ws
 
     async def _handle_api_state(self, request):
+        if not self._is_authenticated(request):
+            raise web.HTTPUnauthorized(text="Authentication required.")
         return web.json_response(self._current_state)
+
+    def _is_authenticated(self, request) -> bool:
+        return request.cookies.get(AUTH_COOKIE) == "1"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -185,28 +226,55 @@ def _cue_to_dict(cue) -> Optional[Dict]:
     }
 
 
-def _render_page(operator_filter: Optional[str], operator_names: List[str], base_url: str) -> str:
+def _render_page(
+    operator_filter: Optional[str],
+    operator_names: List[str],
+    base_url: str,
+    *,
+    authenticated: bool,
+    password_required: bool,
+) -> str:
     title = f"ØJE CUE MONITOR — {operator_filter}" if operator_filter else "ØJE CUE MONITOR"
     filter_js = json.dumps(operator_filter) if operator_filter else "null"
+    operators_js = json.dumps(operator_names)
+    authed_js = "true" if authenticated else "false"
+    password_required_js = "true" if password_required else "false"
+    auth_copy = (
+        "Choose operator name and enter the password shown in the Remote window on the Mac, "
+        "then tap ENTER REMOTE."
+        if password_required
+        else "Choose operator name and tap ENTER REMOTE to open the live cue view."
+    )
+    password_placeholder = "Password from the Mac remote window" if password_required else ""
 
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>{title}</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+html {{
+    height: 100%;
+    background: #000;
+}}
 body {{
     background: #000;
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-    height: 100vh;
+    min-height: 100vh;
+    min-height: 100svh;
+    min-height: 100dvh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
 }}
 .header {{
     background: #0a0a0a;
@@ -215,11 +283,23 @@ body {{
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid #1a1a1a;
+    gap: 12px;
+    flex-shrink: 0;
+}}
+.header-left,
+.header-right {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
 }}
 .header .tc {{
     font-family: 'Menlo', 'Courier New', monospace;
     font-size: 14px;
     color: #333;
+    flex: 1;
+    text-align: center;
+    min-width: 0;
 }}
 .header .clock {{
     font-family: 'Menlo', monospace;
@@ -239,6 +319,9 @@ body {{
     justify-content: center;
     padding: 24px 32px;
     gap: 16px;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }}
 .tag {{
     font-size: 11px;
@@ -290,6 +373,7 @@ body {{
     font-size: clamp(16px, 4vw, 28px);
     color: #e6c840;
     word-wrap: break-word;
+    white-space: pre-wrap;
 }}
 .divider {{
     border-top: 1px solid #222;
@@ -299,6 +383,7 @@ body {{
     padding: 20px 32px;
     background: #050505;
     border-top: 2px solid #1a1a1a;
+    flex-shrink: 0;
 }}
 .next-row {{
     display: flex;
@@ -334,11 +419,96 @@ body {{
     font-size: 14px;
     color: #e6c840;
     font-style: italic;
+    white-space: pre-wrap;
 }}
 .hidden {{ display: none; }}
+.overlay {{
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.94);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+    padding-top: max(24px, env(safe-area-inset-top, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+}}
+.auth-card {{
+    width: min(420px, 100%);
+    background: #111;
+    border: 1px solid #2d2d2d;
+    border-radius: 12px;
+    padding: 24px;
+}}
+.auth-title {{
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 8px;
+}}
+.auth-copy {{
+    font-size: 13px;
+    color: #9a9a9a;
+    margin-bottom: 18px;
+    line-height: 1.4;
+}}
+.field {{
+    margin-bottom: 14px;
+}}
+.field label {{
+    display: block;
+    font-size: 11px;
+    color: #7a7a7a;
+    font-weight: bold;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+}}
+.field select,
+.field input {{
+    width: 100%;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #050505;
+    color: #fff;
+    padding: 12px 14px;
+    font-size: 15px;
+}}
+.actions {{
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}}
+.primary-btn,
+.ghost-btn {{
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #fff;
+    background: #1b1b1b;
+}}
+.primary-btn {{
+    background: #2b5ea7;
+    border-color: #2b5ea7;
+}}
+.error {{
+    color: #ff7d7d;
+    font-size: 12px;
+    min-height: 18px;
+}}
+.mini-btn {{
+    border: 1px solid #2d2d2d;
+    border-radius: 999px;
+    background: #111;
+    color: #858585;
+    padding: 4px 10px;
+    font-size: 11px;
+}}
 .connection-lost {{
     position: fixed;
-    top: 0; left: 0; right: 0;
+    top: env(safe-area-inset-top, 0px); left: 0; right: 0;
     background: #a03030;
     color: white;
     text-align: center;
@@ -347,15 +517,106 @@ body {{
     font-weight: bold;
     z-index: 999;
 }}
+@media (max-width: 700px) {{
+    body {{
+        overflow: auto;
+    }}
+    .header {{
+        padding: 8px 12px;
+    }}
+    .header-left,
+    .header-right {{
+        gap: 8px;
+    }}
+    .header .title,
+    .header .clock {{
+        display: none;
+    }}
+    .header .tc {{
+        text-align: right;
+        font-size: 13px;
+    }}
+    .mini-btn {{
+        padding: 4px 8px;
+    }}
+    .main {{
+        justify-content: flex-start;
+        padding: 18px 16px;
+        gap: 12px;
+    }}
+    .cue-name {{
+        font-size: clamp(24px, 9vw, 40px);
+    }}
+    .cue-desc {{
+        font-size: clamp(14px, 4.2vw, 20px);
+        margin-bottom: 10px;
+    }}
+    .operators {{
+        gap: 10px;
+    }}
+    .op-card {{
+        min-width: 100%;
+        padding: 10px 12px;
+    }}
+    .op-comment {{
+        font-size: clamp(16px, 5.2vw, 24px);
+    }}
+    .next-section {{
+        padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    }}
+    .next-row {{
+        align-items: flex-start;
+        gap: 12px;
+    }}
+    .next-name {{
+        font-size: clamp(18px, 5vw, 26px);
+    }}
+    .next-desc {{
+        font-size: clamp(12px, 3.6vw, 16px);
+    }}
+    .countdown {{
+        font-size: clamp(22px, 8vw, 34px);
+    }}
+    .next-ops {{
+        gap: 8px;
+        margin-top: 6px;
+    }}
+    .next-op {{
+        font-size: 13px;
+    }}
+}}
 </style>
 </head>
 <body>
 <div id="conn-banner" class="connection-lost hidden">CONNECTION LOST — RECONNECTING...</div>
+<div id="auth-overlay" class="overlay hidden">
+    <form class="auth-card" id="auth-form">
+        <div class="auth-title">Remote Access</div>
+        <div class="auth-copy">{auth_copy}</div>
+        <div class="field">
+            <label for="operator-select">OPERATOR</label>
+            <select id="operator-select" autofocus></select>
+        </div>
+        <div class="field" id="password-field">
+            <label for="password-input">PASSWORD</label>
+            <input id="password-input" type="password" autocomplete="current-password" placeholder="{password_placeholder}">
+        </div>
+        <div id="auth-error" class="error"></div>
+        <div class="actions">
+            <button id="auth-submit" class="primary-btn" type="button">ENTER REMOTE</button>
+        </div>
+    </form>
+</div>
 
 <div class="header">
-    <span class="title">{title.upper()}</span>
+    <div class="header-left">
+        <span class="title">{title.upper()}</span>
+        <button id="access-btn" class="mini-btn" type="button">Access</button>
+    </div>
     <span class="tc" id="timecode">--:--:--:--</span>
-    <span class="clock" id="clock"></span>
+    <div class="header-right">
+        <span class="clock" id="clock"></span>
+    </div>
 </div>
 
 <div class="main" id="current-section">
@@ -383,8 +644,12 @@ body {{
 
 <script>
 const OPERATOR_FILTER = {filter_js};
+const OPERATOR_NAMES = {operators_js};
+const AUTHENTICATED = {authed_js};
+const PASSWORD_REQUIRED = {password_required_js};
 let ws;
 let reconnectTimer;
+let currentOperator = OPERATOR_FILTER;
 
 function connect() {{
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -450,8 +715,8 @@ function renderOps(containerId, comments) {{
     const el = document.getElementById(containerId);
     el.innerHTML = '';
 
-    if (OPERATOR_FILTER) {{
-        const comment = comments[OPERATOR_FILTER] || '';
+    if (currentOperator) {{
+        const comment = comments[currentOperator] || '';
         if (comment) {{
             el.innerHTML = '<div class="op-card solo"><div class="op-comment">' +
                 escHtml(comment) + '</div></div>';
@@ -470,8 +735,8 @@ function renderNextOps(comments) {{
     const el = document.getElementById('next-ops');
     el.innerHTML = '';
 
-    if (OPERATOR_FILTER) {{
-        const comment = comments[OPERATOR_FILTER] || '';
+    if (currentOperator) {{
+        const comment = comments[currentOperator] || '';
         if (comment) {{
             el.innerHTML = '<span class="next-op">' + escHtml(comment) + '</span>';
         }}
@@ -495,9 +760,104 @@ function updateClock() {{
         String(now.getSeconds()).padStart(2,'0');
 }}
 
+function buildOperatorOptions() {{
+    const select = document.getElementById('operator-select');
+    select.innerHTML = '<option value="">All Operators</option>';
+    for (const name of OPERATOR_NAMES) {{
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === currentOperator) opt.selected = true;
+        select.appendChild(opt);
+    }}
+}}
+
+async function submitAuth() {{
+    const operator = document.getElementById('operator-select').value;
+    const password = document.getElementById('password-input').value;
+    const errorEl = document.getElementById('auth-error');
+    const submitBtn = document.getElementById('auth-submit');
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+
+    try {{
+        const resp = await fetch('/auth', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ operator, password }}),
+            credentials: 'same-origin',
+        }});
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {{
+            errorEl.textContent = data.error || 'Authentication failed.';
+            return;
+        }}
+        currentOperator = operator || null;
+        location.reload();
+    }} catch (_err) {{
+        errorEl.textContent = 'Could not reach the remote server.';
+    }} finally {{
+        submitBtn.disabled = false;
+    }}
+}}
+
+function initAuth() {{
+    buildOperatorOptions();
+    const overlay = document.getElementById('auth-overlay');
+    const passwordInput = document.getElementById('password-input');
+    const operatorSelect = document.getElementById('operator-select');
+    const authForm = document.getElementById('auth-form');
+    const authSubmit = document.getElementById('auth-submit');
+    document.getElementById('password-field').classList.toggle('hidden', !PASSWORD_REQUIRED);
+    authForm.addEventListener('submit', (event) => {{
+        event.preventDefault();
+        submitAuth();
+    }});
+    authSubmit.addEventListener('click', (event) => {{
+        event.preventDefault();
+        submitAuth();
+    }});
+    document.getElementById('access-btn').addEventListener('click', () => {{
+        document.getElementById('auth-error').textContent = '';
+        overlay.classList.remove('hidden');
+        if (!PASSWORD_REQUIRED) {{
+            passwordInput.value = '';
+            operatorSelect.focus();
+        }} else {{
+            passwordInput.focus();
+        }}
+    }});
+    document.addEventListener('keydown', (event) => {{
+        if (!overlay.classList.contains('hidden') && event.key === 'Enter') {{
+            event.preventDefault();
+            submitAuth();
+        }}
+    }});
+    operatorSelect.addEventListener('change', () => {{
+        document.getElementById('auth-error').textContent = '';
+    }});
+    passwordInput.addEventListener('input', () => {{
+        document.getElementById('auth-error').textContent = '';
+    }});
+
+    if (!AUTHENTICATED) {{
+        overlay.classList.remove('hidden');
+        if (PASSWORD_REQUIRED) {{
+            passwordInput.focus();
+        }} else {{
+            operatorSelect.focus();
+        }}
+        return false;
+    }}
+    overlay.classList.add('hidden');
+    return true;
+}}
+
 setInterval(updateClock, 1000);
 updateClock();
-connect();
+if (initAuth()) {{
+    connect();
+}}
 </script>
 </body>
 </html>"""

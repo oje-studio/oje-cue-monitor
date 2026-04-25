@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "settings": {
+    "show_title": "Hour Boundary Test",
+    "audio_device_name": "",
+    "audio_channel": 0,
+    "logo_path": "",
+    "operator_names": [
+      "Lighting",
+      "Audio",
+      "Stage Manager"
+    ],
+    "remote_password": "",
+    "perf_cue_name_size": 56,
+    "perf_cue_desc_size": 26,
+    "perf_operator_size": 20,
+    "perf_operator_name_size": 12,
+    "perf_next_name_size": 30,
+    "perf_next_desc_size": 16,
+    "perf_countdown_size": 36,
+    "countdown_enabled": true
+  },
+  "cues": [
+    {
+      "timecode": "",
+      "name": "HOUR 0",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "00:00:00:00",
+      "name": "Hour 0 Start",
+      "description": "Baseline cue at zero",
+      "color": "blue",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "House preset",
+        "Audio": "Playback ready",
+        "Stage Manager": "Stand by opening"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "00:15:00:00",
+      "name": "Quarter 0A",
+      "description": "Early check between 0 and 1 hour",
+      "color": "green",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Fade to warm wash",
+        "Audio": "Fade bed under host",
+        "Stage Manager": "Cue presenter GO"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "00:45:00:00",
+      "name": "Quarter 0B",
+      "description": "Late check before 1 hour",
+      "color": "amber",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Prepare transition state",
+        "Audio": "Stand by stinger",
+        "Stage Manager": "Check backstage clear"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "",
+      "name": "HOUR 1",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "01:00:00:00",
+      "name": "Hour 1 Start",
+      "description": "Exact 1 hour boundary",
+      "color": "purple",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Shift to act 2 look",
+        "Audio": "Roll hour marker sting",
+        "Stage Manager": "Stand by act 2 GO"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "01:15:00:00",
+      "name": "Quarter 1A",
+      "description": "Early check between 1 and 2 hours",
+      "color": "teal",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Panel wash",
+        "Audio": "Mic check hold",
+        "Stage Manager": "Confirm seats"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "01:30:00:00",
+      "name": "Midpoint 1B",
+      "description": "Known reference cue from the current bug",
+      "color": "orange",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Key light bump",
+        "Audio": "Walk-in bed low",
+        "Stage Manager": "Stand by featured guest"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "01:45:00:00",
+      "name": "Quarter 1C",
+      "description": "Late check before 2 hours",
+      "color": "rose",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Cool backlight",
+        "Audio": "Stand by sting",
+        "Stage Manager": "Prep transition"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "",
+      "name": "HOUR 2",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "02:00:00:00",
+      "name": "Hour 2 Start",
+      "description": "Exact 2 hour boundary",
+      "color": "red",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Big transition GO",
+        "Audio": "Hit downbeat",
+        "Stage Manager": "Cue company GO"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "02:15:00:00",
+      "name": "Quarter 2A",
+      "description": "Early check between 2 and 3 hours",
+      "color": "cyan",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Cyan side texture",
+        "Audio": "Bring FX live",
+        "Stage Manager": "Monitor deck traffic"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "02:45:00:00",
+      "name": "Quarter 2B",
+      "description": "Late check before 3 hours",
+      "color": "indigo",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Indigo hold",
+        "Audio": "Stand by outro",
+        "Stage Manager": "Prep final transition"
+      },
+      "is_divider": false
+    },
+    {
+      "timecode": "",
+      "name": "HOUR 3",
+      "description": "",
+      "color": "",
+      "group": "",
+      "operator_comments": {},
+      "is_divider": true
+    },
+    {
+      "timecode": "03:00:00:00",
+      "name": "Hour 3 Start",
+      "description": "Exact 3 hour boundary",
+      "color": "white",
+      "group": "",
+      "operator_comments": {
+        "Lighting": "Full white end state",
+        "Audio": "Finale music GO",
+        "Stage Manager": "Cue bows"
+      },
+      "is_divider": false
+    }
+  ]
+}

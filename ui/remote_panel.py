@@ -2,7 +2,7 @@
 Remote Access panel — shows URLs and QR codes for web remote connections.
 """
 from __future__ import annotations
-from typing import List, Optional
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -19,10 +19,10 @@ import base64
 class RemotePanel(QDialog):
     """Dialog showing remote access URLs and QR codes."""
 
-    def __init__(self, port: int, operator_names: List[str], parent=None):
+    def __init__(self, port: int, password: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Remote Access")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(620)
         self.setMinimumHeight(500)
 
         ip = get_local_ip()
@@ -40,8 +40,8 @@ class RemotePanel(QDialog):
         root.addWidget(title)
 
         hint = QLabel(
-            "Devices on the same WiFi network can view the cue list in real-time.\n"
-            "Scan QR code or open the link in a browser."
+            "Devices on the same WiFi network can open one shared link.\n"
+            "On the page they choose operator name and enter the password shown below."
         )
         hint.setStyleSheet("color: #888; font-size: 12px;")
         hint.setWordWrap(True)
@@ -58,21 +58,52 @@ class RemotePanel(QDialog):
         clay.setSpacing(16)
         clay.setContentsMargins(0, 0, 0, 0)
 
-        # Main URL (all operators)
+        # Single shared URL
         clay.addWidget(self._make_entry(
-            "All Operators (full view)",
+            "Shared Remote Link",
             base_url,
         ))
 
-        # Per-operator URLs
-        for name in operator_names:
-            import urllib.parse
-            encoded = urllib.parse.quote(name)
-            url = f"{base_url}/operator/{encoded}"
-            clay.addWidget(self._make_entry(
-                f"Operator: {name}",
-                url,
-            ))
+        if password:
+            pwd_frame = QFrame()
+            pwd_frame.setStyleSheet(
+                "QFrame { background: #111; border: 1px solid #333; border-radius: 8px; }"
+            )
+            pwd_lay = QVBoxLayout(pwd_frame)
+            pwd_lay.setContentsMargins(14, 12, 14, 12)
+            pwd_lay.setSpacing(4)
+
+            pwd_tag = QLabel("ACCESS PASSWORD")
+            pwd_tag.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
+            pwd_lay.addWidget(pwd_tag)
+
+            pwd = QLabel(password)
+            pwd.setStyleSheet("color: #f0f0f0; font-size: 24px; font-weight: bold;")
+            pwd.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            pwd_lay.addWidget(pwd)
+            clay.addWidget(pwd_frame)
+        else:
+            pwd_frame = QFrame()
+            pwd_frame.setStyleSheet(
+                "QFrame { background: #111; border: 1px solid #333; border-radius: 8px; }"
+            )
+            pwd_lay = QVBoxLayout(pwd_frame)
+            pwd_lay.setContentsMargins(14, 12, 14, 12)
+            pwd_lay.setSpacing(4)
+
+            pwd_tag = QLabel("ACCESS PASSWORD")
+            pwd_tag.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
+            pwd_lay.addWidget(pwd_tag)
+
+            pwd = QLabel("Not set")
+            pwd.setStyleSheet("color: #c8c8c8; font-size: 18px; font-weight: bold;")
+            pwd_lay.addWidget(pwd)
+
+            pwd_hint = QLabel("Open Settings to add a password for phones and tablets.")
+            pwd_hint.setStyleSheet("color: #777; font-size: 11px;")
+            pwd_hint.setWordWrap(True)
+            pwd_lay.addWidget(pwd_hint)
+            clay.addWidget(pwd_frame)
 
         clay.addStretch()
         scroll.setWidget(content)
@@ -102,14 +133,14 @@ class RemotePanel(QDialog):
             img = QImage()
             img.loadFromData(img_data)
             pix = QPixmap.fromImage(img).scaled(
-                80, 80, Qt.AspectRatioMode.KeepAspectRatio,
+                180, 180, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             qr_lbl.setPixmap(pix)
         else:
             qr_lbl.setText("(no qrcode)")
             qr_lbl.setStyleSheet("color: #555; font-size: 10px;")
-        qr_lbl.setFixedSize(80, 80)
+        qr_lbl.setFixedSize(180, 180)
         lay.addWidget(qr_lbl)
 
         # Text info

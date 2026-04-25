@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 
+import html
 import logging
 import os
 import platform
@@ -10,12 +11,13 @@ from datetime import datetime
 from PyQt6.QtCore import Qt, QTimer, QSettings
 from PyQt6.QtGui import (
     QColor, QFont, QPalette, QKeySequence, QShortcut,
-    QPainter, QBrush, QPixmap,
+    QPainter, QBrush, QPixmap, QTextDocument, QPageSize,
 )
+from PyQt6.QtPrintSupport import QPrinter
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QFileDialog, QMessageBox,
-    QFrame, QStackedWidget, QDialog,
+    QFrame, QStackedWidget, QDialog, QSplitter,
 )
 
 from cue_engine import CueEngine, CueParseError
@@ -165,9 +167,10 @@ class CueCard(QFrame):
         self.desc_lbl.setText(cue.description)
         # Iterate the current operator list (not cue.operator_comments keys)
         # so renamed/removed operators don't leak stale entries into the view.
+        # Multi-line comments are indented on continuation lines for legibility.
         comments = cue.operator_comments or {}
         lines = [
-            f"{name}: {comments[name]}"
+            f"{name}: {comments[name].replace(chr(10), chr(10) + '    ')}"
             for name in self._operator_names
             if comments.get(name)
         ]
@@ -203,6 +206,8 @@ class MainWindow(QMainWindow):
         self._last_tc         = (0, 0, 0, 0)
         self._last_fps        = 25.0
         self._signal_ok       = False
+        self._last_db         = -120.0
+        self._signal_warning_text = ""
         self._blink_state     = False
         self._edit_mode       = False
         self._logo_pixmap: Optional[QPixmap] = None
@@ -249,6 +254,7 @@ class MainWindow(QMainWindow):
 
         self._perf_view = PerformanceView()
         self._stack.addWidget(self._perf_view)
+        self._perf_view.update_signal_state(False, self._last_db, self._signal_warning_text)
 
         self._stack.setCurrentIndex(self.PAGE_NORMAL)
 
@@ -334,6 +340,7 @@ class MainWindow(QMainWindow):
         # ── Cue cards ─────────────────────────────────────────────────────────
         cards_w = QWidget()
         cards_w.setStyleSheet(f"background: {DARK_BG.name()};")
+        self._cards_w = cards_w
         cl = QHBoxLayout(cards_w)
         cl.setContentsMargins(16, 12, 16, 12)
         cl.setSpacing(16)
@@ -362,9 +369,18 @@ class MainWindow(QMainWindow):
         self._op_panel.operator_changed.connect(self._on_operator_changed)
         self._op_panel.setVisible(False)
 
+        table_area = QSplitter(Qt.Orientation.Horizontal)
+        table_area.setChildrenCollapsible(False)
+        table_area.setHandleWidth(1)
+        table_area.addWidget(self._table)
+        table_area.addWidget(self._op_panel)
+        table_area.setStretchFactor(0, 5)
+        table_area.setStretchFactor(1, 2)
+        table_area.setSizes([980, 320])
+        self._table_splitter = table_area
+
         root.addWidget(self._edit_toolbar)
-        root.addWidget(self._table, stretch=1)
-        root.addWidget(self._op_panel)
+        root.addWidget(table_area, stretch=1)
         root.addWidget(_hline())
 
         # ── Footer ────────────────────────────────────────────────────────────
@@ -399,6 +415,12 @@ class MainWindow(QMainWindow):
         self._btn_save_as.setToolTip("Save to a new file")
         self._btn_save_as.clicked.connect(self._save_show_as)
         fl.addWidget(self._btn_save_as)
+
+        self._btn_export_pdf = QPushButton("Export PDF")
+        self._btn_export_pdf.setFixedHeight(30)
+        self._btn_export_pdf.setToolTip("Export printable cue sheet as PDF")
+        self._btn_export_pdf.clicked.connect(self._export_pdf)
+        fl.addWidget(self._btn_export_pdf)
 
         fl.addWidget(_vline())
 
@@ -550,19 +572,28 @@ class MainWindow(QMainWindow):
 
     # ── Show file operations ──────────────────────────────────────────────────
 
+    def _confirm_discard_or_save(self, title: str, prompt: str) -> bool:
+        if not self._dirty:
+            return True
+
+        reply = QMessageBox.question(
+            self, title, prompt,
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Save:
+            return self._save_show()
+        return True
+
     def _new_show(self):
-        if self._engine.cues:
-            reply = QMessageBox.question(
-                self, "New Show",
-                "Save current show before creating a new one?",
-                QMessageBox.StandardButton.Yes
-                | QMessageBox.StandardButton.No
-                | QMessageBox.StandardButton.Cancel,
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Yes:
-                self._save_show()
+        if not self._confirm_discard_or_save(
+            "New Show",
+            "Save current show before creating a new one?",
+        ):
+            return
 
         self._show = ShowFile()
         self._show_settings = ShowSettings()
@@ -574,6 +605,12 @@ class MainWindow(QMainWindow):
         logger.info("New show created")
 
     def _open_show(self):
+        if not self._confirm_discard_or_save(
+            "Open Show",
+            "Save current show before opening another file?",
+        ):
+            return
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Show File", "",
             "Show Files (*.ojeshow);;CSV Files (*.csv);;All Files (*)"
@@ -594,6 +631,7 @@ class MainWindow(QMainWindow):
             self._apply_settings(self._show_settings)
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._qsettings.setValue("last_show", path)
+            self._clear_autosave()
         except (OSError, ValueError) as e:
             QMessageBox.critical(self, "Load Error", str(e))
 
@@ -605,10 +643,11 @@ class MainWindow(QMainWindow):
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)} (imported)")
+            self._clear_autosave()
         except (OSError, CueParseError) as e:
             QMessageBox.critical(self, "Import Error", str(e))
 
-    def _save_show(self):
+    def _save_show(self) -> bool:
         logger.info("Save requested")
         if self._show is None:
             self._show = ShowFile()
@@ -624,7 +663,7 @@ class MainWindow(QMainWindow):
             )
         if not path:
             logger.info("Save cancelled by user")
-            return
+            return False
         if not path.endswith(".ojeshow"):
             path += ".ojeshow"
         try:
@@ -634,9 +673,11 @@ class MainWindow(QMainWindow):
             self._flash_save_ok()
             self._clear_autosave()
             logger.info("Saved to %s", path)
+            return True
         except OSError as e:
             logger.error("Save failed: %s", e)
             QMessageBox.critical(self, "Save Error", str(e))
+            return False
 
     def _flash_save_ok(self):
         self._btn_save.setText("Saved!")
@@ -650,7 +691,7 @@ class MainWindow(QMainWindow):
         self._btn_save.setText("Save")
         self._btn_save.setStyleSheet("")
 
-    def _save_show_as(self):
+    def _save_show_as(self) -> bool:
         if self._show is None:
             self._show = ShowFile()
         self._show.cues = self._engine.to_show_cues()
@@ -660,7 +701,7 @@ class MainWindow(QMainWindow):
             "Show Files (*.ojeshow);;All Files (*)"
         )
         if not path:
-            return
+            return False
         if not path.endswith(".ojeshow"):
             path += ".ojeshow"
         try:
@@ -669,8 +710,206 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._clear_autosave()
             logger.info("Saved as %s", path)
+            return True
         except OSError as e:
             QMessageBox.critical(self, "Save Error", str(e))
+            return False
+
+    def _default_pdf_export_path(self) -> str:
+        if self._show and self._show.file_path:
+            base, _ = os.path.splitext(self._show.file_path)
+            return base + ".pdf"
+        return os.path.join(os.path.expanduser("~"), "OJE Cue Sheet.pdf")
+
+    def _current_show_title(self) -> str:
+        if self._show_settings.show_title.strip():
+            return self._show_settings.show_title.strip()
+        if self._show and self._show.file_path:
+            stem = os.path.splitext(os.path.basename(self._show.file_path))[0]
+            return stem.replace("_", " ")
+        return "Untitled Show"
+
+    def _build_pdf_html(self) -> str:
+        operator_names = list(self._show_settings.operator_names or [])
+        show_name = self._current_show_title()
+
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        rows = []
+        for cue in self._engine.cues:
+            if cue.is_divider:
+                rows.append(
+                    "<tr class='section'>"
+                    f"<td colspan='5'>{html.escape(cue.name or 'SECTION')}</td>"
+                    "</tr>"
+                )
+                continue
+
+            notes_parts = []
+            for op_name in operator_names:
+                comment = cue.operator_comments.get(op_name, "")
+                if comment:
+                    notes_parts.append(
+                        f"<div class='note'><span class='note-name'>{html.escape(op_name)}</span><br>"
+                        f"{html.escape(comment).replace(chr(10), '<br>')}</div>"
+                    )
+            notes_html = "".join(notes_parts) if notes_parts else "<span class='muted'>—</span>"
+            color_name = (cue.color or "").strip()
+            if color_name:
+                color_html = (
+                    f"<span class='swatch' style='background:{html.escape(_pdf_color_hex(color_name))};'></span>"
+                )
+            else:
+                color_html = "<span class='muted'>—</span>"
+
+            rows.append(
+                "<tr>"
+                f"<td class='tc'>{html.escape(cue.timecode or '')}</td>"
+                f"<td>{html.escape(cue.name or '')}</td>"
+                f"<td>{html.escape(cue.description or '')}</td>"
+                f"<td class='color-cell'>{color_html}</td>"
+                f"<td>{notes_html}</td>"
+                + "</tr>"
+            )
+
+        if not rows:
+            rows.append("<tr><td colspan='99' class='empty'>No cues in show.</td></tr>")
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body {{
+    font-family: Helvetica, Arial, sans-serif;
+    color: #111;
+    font-size: 9.5pt;
+    margin: 40pt 44pt 44pt 44pt;
+}}
+h1 {{
+    font-size: 20pt;
+    margin: 0 0 6pt 0;
+    font-weight: 700;
+}}
+.meta {{
+    color: #666;
+    font-size: 8.5pt;
+    margin-bottom: 16pt;
+}}
+table {{
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}}
+th, td {{
+    border-bottom: 1px solid #e2e4e8;
+    padding: 7pt 8pt;
+    text-align: left;
+    vertical-align: top;
+    word-wrap: break-word;
+}}
+th {{
+    background: #f7f7f8;
+    color: #6a6a6a;
+    border-top: 1px solid #e2e4e8;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.8pt;
+}}
+.tc {{
+    white-space: nowrap;
+    font-family: Courier, monospace;
+}}
+.section td {{
+    background: #f3f4f7;
+    border-top: 1px solid #d7dbe2;
+    border-bottom: 1px solid #d7dbe2;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.8pt;
+    color: #333;
+}}
+.color-cell {{
+    white-space: nowrap;
+    text-align: center;
+}}
+.swatch {{
+    display: inline-block;
+    width: 12pt;
+    height: 12pt;
+    border-radius: 999px;
+    vertical-align: middle;
+    border: 1px solid rgba(0,0,0,0.14);
+}}
+.note {{
+    margin-bottom: 7pt;
+    padding-bottom: 7pt;
+    border-bottom: 1px solid #f0f1f3;
+}}
+.note:last-child {{
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}}
+.note-name {{
+    font-weight: bold;
+    color: #222;
+}}
+.muted {{
+    color: #777;
+}}
+.empty {{
+    color: #666;
+    text-align: center;
+    padding: 18pt;
+}}
+</style>
+</head>
+<body>
+<h1>{html.escape(show_name)}</h1>
+<div class="meta">Generated {html.escape(generated_at)} · {html.escape(APP_NAME)} {html.escape(VERSION)}</div>
+<table>
+<thead>
+<tr>
+<th style="width: 14%;">Timecode</th>
+<th style="width: 18%;">Cue</th>
+<th style="width: 30%;">Description</th>
+<th style="width: 7%;">Color</th>
+<th style="width: 31%;">Operator Notes</th>
+</tr>
+</thead>
+<tbody>
+{''.join(rows)}
+</tbody>
+</table>
+</body>
+</html>"""
+
+    def _export_pdf(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Cue Sheet PDF", self._default_pdf_export_path(),
+            "PDF Files (*.pdf);;All Files (*)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(path)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+
+        doc = QTextDocument()
+        doc.setHtml(self._build_pdf_html())
+        try:
+            doc.print(printer)
+            QMessageBox.information(
+                self, "PDF Exported",
+                f"Exported printable cue sheet to:\n{path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Export Error", str(e))
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -704,6 +943,16 @@ class MainWindow(QMainWindow):
 
         # Operator edit panel
         self._op_panel.set_operators(settings.operator_names)
+        if self._edit_mode:
+            row = self._table.currentRow()
+            if 0 <= row < len(self._engine.cues):
+                cue = self._engine.cues[row]
+                if not cue.is_divider:
+                    self._op_panel.show_for_cue(row, cue)
+
+        if self._web_remote and self._web_remote._running:
+            self._web_remote.set_operators(settings.operator_names)
+            self._web_remote.set_remote_password(settings.remote_password)
 
         # Re-render current/next cards so operator list changes take effect
         # without waiting for the next timecode poll.
@@ -723,6 +972,7 @@ class MainWindow(QMainWindow):
             return
         self._web_remote = WebRemoteServer(port=8080)
         self._web_remote.set_operators(self._show_settings.operator_names)
+        self._web_remote.set_remote_password(self._show_settings.remote_password)
         self._web_remote.start()
         self._btn_remote.setText("Remote ON")
         self._btn_remote.setStyleSheet(
@@ -742,7 +992,7 @@ class MainWindow(QMainWindow):
 
     def _show_remote_panel(self):
         port = self._web_remote.port if self._web_remote else 8080
-        dlg = RemotePanel(port, self._show_settings.operator_names, self)
+        dlg = RemotePanel(port, self._show_settings.remote_password, self)
         dlg.exec()
 
     # ── Logo ─────────────────────────────────────────────────────────────────
@@ -772,11 +1022,17 @@ class MainWindow(QMainWindow):
             # Show operator panel if operators are defined
             if self._show_settings.operator_names:
                 self._op_panel.setVisible(True)
+            self._table_splitter.setSizes([70, 30])
+            row = self._table.currentRow()
+            if 0 <= row < len(self._engine.cues):
+                cue = self._engine.cues[row]
+                if not cue.is_divider:
+                    self._op_panel.show_for_cue(row, cue)
         else:
             self._btn_edit.setText("Edit Cues")
             self._btn_edit.setStyleSheet("")
             self._op_panel.hide_panel()
-            self._save_show()
+            self._table_splitter.setSizes([1280, 0])
 
     def _on_cue_selected(self, row: int):
         if 0 <= row < len(self._engine.cues):
@@ -869,12 +1125,25 @@ class MainWindow(QMainWindow):
                 if dev["name"] == dev_name:
                     device_index = dev["index"]
                     break
+            if device_index is None:
+                self._show_error(
+                    "The selected audio device is not currently available.\n\n"
+                    "Reconnect it or open Settings and choose another input device."
+                )
+                return
         channel_index = self._show_settings.audio_channel
 
         self._engine.reset_active()
         logger.info("Starting decoder  device=%s  channel=%d", device_index, channel_index)
-        self._decoder = LTCDecoder(device_index=device_index, channel_index=channel_index)
-        self._decoder.start()
+        try:
+            self._decoder = LTCDecoder(device_index=device_index, channel_index=channel_index)
+            self._decoder.start()
+        except Exception as e:
+            logger.error("Failed to start decoder: %s", e)
+            self._decoder = None
+            self._show_error(f"Could not start LTC decoder:\n{e}")
+            return
+
         self._running = True
         self._poll_timer.start()
         self._btn_start.setText("STOP")
@@ -892,7 +1161,10 @@ class MainWindow(QMainWindow):
         self._btn_start.setStyleSheet(_start_btn_style())
         self._live_label.setVisible(False)
         self._signal_ok = False
+        self._last_db = -120.0
+        self._signal_warning_text = ""
         self._refresh_signal_dot()
+        self._perf_view.update_signal_state(self._signal_ok, self._last_db, self._signal_warning_text)
 
     # ── decoder polling ───────────────────────────────────────────────────────
 
@@ -920,6 +1192,7 @@ class MainWindow(QMainWindow):
             self._signal_ok = True
             self._blink_timer.stop()
             self._refresh_signal_dot()
+            self._perf_view.update_signal_state(self._signal_ok, self._last_db, self._signal_warning_text)
             self._update_cues(tc_str)
             self._log(f"TC {tc_str}  fps={fps:.2f}")
 
@@ -928,17 +1201,22 @@ class MainWindow(QMainWindow):
             h, m, s, f = self._last_tc
             self._tc_label.setText(f"{h:02d}:{m:02d}:{s:02d}:{f:02d}  [NO SIGNAL]")
             self._blink_timer.start()
+            self._signal_warning_text = ""
+            self._perf_view.update_signal_state(self._signal_ok, self._last_db, self._signal_warning_text)
             self._log("SIGNAL LOST")
 
         elif kind == "level":
             db = msg[1]
+            self._last_db = db
             self._vu.set_db(db)
             if db < -40:
-                self._signal_warn.setText("Weak signal")
+                self._signal_warning_text = "Weak signal"
             elif db > -3:
-                self._signal_warn.setText("Clipping!")
+                self._signal_warning_text = "Clipping!"
             else:
-                self._signal_warn.setText("")
+                self._signal_warning_text = ""
+            self._signal_warn.setText(self._signal_warning_text)
+            self._perf_view.update_signal_state(self._signal_ok, self._last_db, self._signal_warning_text)
 
         elif kind == "error":
             self._stop_decoder()
@@ -957,7 +1235,9 @@ class MainWindow(QMainWindow):
 
         cur_group = self._engine.get_group_for_cue(current) if current else ""
         nxt_group = self._engine.get_group_for_cue(nxt) if nxt else ""
-        self._perf_view.update_display(current, nxt, countdown, tc_str, cur_group, nxt_group)
+        self._perf_view.update_display(
+            current, nxt, countdown, tc_str, cur_group, nxt_group, self._last_fps, self._engine.cues
+        )
 
         if self._web_remote and self._web_remote._running:
             self._web_remote.broadcast_state(
@@ -985,7 +1265,9 @@ class MainWindow(QMainWindow):
         countdown = self._engine.get_countdown(self._current_frames)
         cur_group = self._engine.get_group_for_cue(current) if current else ""
         nxt_group = self._engine.get_group_for_cue(nxt) if nxt else ""
-        self._perf_view.update_display(current, nxt, countdown, tc_str, cur_group, nxt_group)
+        self._perf_view.update_display(
+            current, nxt, countdown, tc_str, cur_group, nxt_group, self._last_fps, self._engine.cues
+        )
 
     def _exit_perf_mode(self):
         if self._stack.currentIndex() == self.PAGE_PERF:
@@ -1206,7 +1488,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         # Offer to save unsaved changes before closing.
-        if self._dirty and self._engine.cues:
+        if self._dirty:
             reply = QMessageBox.question(
                 self, "Unsaved Changes",
                 "Save changes before closing?",
@@ -1218,7 +1500,9 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             if reply == QMessageBox.StandardButton.Save:
-                self._save_show()   # clears autosave on success
+                if not self._save_show():   # clears autosave on success
+                    event.ignore()
+                    return
             elif reply == QMessageBox.StandardButton.Discard:
                 self._clear_autosave()
 
@@ -1274,3 +1558,29 @@ def _perf_btn_style() -> str:
         f"color: white; font-weight: bold; border-radius: 4px; }}"
         f"QPushButton:hover {{ background: {QColor(58,92,165).name()}; }}"
     )
+
+
+def _pdf_color_hex(name: str) -> str:
+    mapping = {
+        "red": "#af3030",
+        "dark red": "#781919",
+        "orange": "#c36926",
+        "amber": "#d2a01e",
+        "yellow": "#af9b26",
+        "lime": "#5fb42d",
+        "green": "#309b4b",
+        "dark green": "#1e6432",
+        "teal": "#268c82",
+        "cyan": "#30a5af",
+        "sky": "#4691d2",
+        "blue": "#305faf",
+        "dark blue": "#233782",
+        "indigo": "#4b37a0",
+        "purple": "#7d37af",
+        "magenta": "#a5328c",
+        "pink": "#c35f9b",
+        "rose": "#be465a",
+        "white": "#c8c8c8",
+        "grey": "#6e6e6e",
+    }
+    return mapping.get(name.lower().strip(), "#9a9a9a")
