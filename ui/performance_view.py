@@ -2,15 +2,41 @@ from __future__ import annotations
 from typing import Optional, List, Dict
 from datetime import datetime
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QPushButton, QListWidget, QListWidgetItem,
+)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtGui import QFont, QPixmap, QColor
 
 from show_file import ShowSettings
 from ui.fonts import mono_font, sans_font
 
 APP_NAME  = "ØJE CUE MONITOR"
 COPYRIGHT = "© 2026 ØJE Studio"
+
+_CUE_COLORS = {
+    "red": "#af3030",
+    "dark red": "#781919",
+    "orange": "#c36926",
+    "amber": "#d2a01e",
+    "yellow": "#af9b26",
+    "lime": "#5fb42d",
+    "green": "#309b4b",
+    "dark green": "#1e6432",
+    "teal": "#268c82",
+    "cyan": "#30a5af",
+    "sky": "#4691d2",
+    "blue": "#305faf",
+    "dark blue": "#233782",
+    "indigo": "#4b37a0",
+    "purple": "#7d37af",
+    "magenta": "#a5328c",
+    "pink": "#c35f9b",
+    "rose": "#be465a",
+    "white": "#c8c8c8",
+    "grey": "#6e6e6e",
+}
 
 
 class PerformanceView(QWidget):
@@ -28,24 +54,69 @@ class PerformanceView(QWidget):
         self._operator_names: List[str] = ["Operator 1"]
         self._settings: Optional[ShowSettings] = None
         self._countdown_enabled: bool = True
+        self._signal_ok: bool = False
+        self._signal_db: float = -120.0
+        self._signal_warning: str = ""
+        self._fps: float = 25.0
+        self._cues: List = []
+        self._current_cue_index: int = -1
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Real time bar ────────────────────────────────────────────────────
+        # ── Status bar ───────────────────────────────────────────────────────
         time_bar = QWidget()
-        time_bar.setFixedHeight(36)
+        time_bar.setFixedHeight(54)
         time_bar.setStyleSheet("background: #0a0a0a;")
         tb_lay = QHBoxLayout(time_bar)
-        tb_lay.setContentsMargins(20, 0, 20, 0)
+        tb_lay.setContentsMargins(24, 0, 24, 0)
+        tb_lay.setSpacing(10)
+
+        self._signal_dot_lbl = QLabel("●")
+        self._signal_dot_lbl.setStyleSheet("color: #d75a5a; font-size: 18px;")
+        tb_lay.addStretch()
+        tb_lay.addWidget(self._signal_dot_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._tc_header_lbl = QLabel("--:--:--:--")
+        self._tc_header_lbl.setFont(mono_font(24, bold=True))
+        self._tc_header_lbl.setStyleSheet("color: #f0f0f0;")
+        tb_lay.addWidget(self._tc_header_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._sep_1 = QLabel("|")
+        self._sep_1.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        tb_lay.addWidget(self._sep_1, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._fps_lbl = QLabel("FPS 25.00")
+        self._fps_lbl.setFont(mono_font(15, bold=True))
+        self._fps_lbl.setStyleSheet("color: #858585;")
+        tb_lay.addWidget(self._fps_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._sep_2 = QLabel("|")
+        self._sep_2.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        tb_lay.addWidget(self._sep_2, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._signal_state_lbl = QLabel("NO SIGNAL")
+        self._signal_state_lbl.setFont(mono_font(15, bold=True))
+        tb_lay.addWidget(self._signal_state_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._sep_level = QLabel("|")
+        self._sep_level.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        tb_lay.addWidget(self._sep_level, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._signal_level_lbl = QLabel("−∞ dB")
+        self._signal_level_lbl.setFont(mono_font(15, bold=True))
+        self._signal_level_lbl.setStyleSheet("color: #7a7a7a;")
+        tb_lay.addWidget(self._signal_level_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._sep_3 = QLabel("|")
+        self._sep_3.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        tb_lay.addWidget(self._sep_3, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._clock_lbl = QLabel("")
-        self._clock_lbl.setFont(mono_font(14, bold=True))
-        self._clock_lbl.setStyleSheet("color: #555555;")
-        self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tb_lay.addStretch()
-        tb_lay.addWidget(self._clock_lbl)
+        self._clock_lbl.setFont(mono_font(24, bold=True))
+        self._clock_lbl.setStyleSheet("color: #dcdcdc;")
+        tb_lay.addWidget(self._clock_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         tb_lay.addStretch()
 
         root.addWidget(time_bar)
@@ -179,6 +250,7 @@ class PerformanceView(QWidget):
         self._tc_overlay.setFont(mono_font(13))
         self._tc_overlay.setStyleSheet("color: #2a2a2a; background: transparent;")
         self._tc_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._tc_overlay.hide()
 
         self._esc_hint = QLabel("Esc  —  exit performance mode", self)
         self._esc_hint.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
@@ -187,6 +259,52 @@ class PerformanceView(QWidget):
         self._copyright_lbl = QLabel(f"{APP_NAME}  {COPYRIGHT}", self)
         self._copyright_lbl.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
         self._copyright_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self._cue_overlay = QFrame(self)
+        self._cue_overlay.setStyleSheet(
+            "QFrame { background: rgba(6, 6, 6, 245); border: 1px solid #1f1f1f; border-radius: 12px; }"
+        )
+        self._cue_overlay.hide()
+
+        overlay_lay = QVBoxLayout(self._cue_overlay)
+        overlay_lay.setContentsMargins(18, 16, 18, 16)
+        overlay_lay.setSpacing(12)
+
+        overlay_head = QHBoxLayout()
+        overlay_head.setSpacing(10)
+
+        overlay_title = QLabel("FULL CUE LIST")
+        overlay_title.setStyleSheet("color: #dcdcdc; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        overlay_head.addWidget(overlay_title)
+        overlay_head.addStretch()
+
+        self._cue_overlay_close_btn = QPushButton("Close")
+        self._cue_overlay_close_btn.setFixedHeight(30)
+        self._cue_overlay_close_btn.setStyleSheet(
+            "QPushButton { background: #181818; color: #c8c8c8; border: 1px solid #2a2a2a; border-radius: 6px; padding: 0 12px; }"
+        )
+        self._cue_overlay_close_btn.clicked.connect(self._hide_cue_overlay)
+        overlay_head.addWidget(self._cue_overlay_close_btn)
+        overlay_lay.addLayout(overlay_head)
+
+        self._cue_list_widget = QListWidget()
+        self._cue_list_widget.setStyleSheet(
+            "QListWidget { background: #0d0d0d; color: #d0d0d0; border: 1px solid #1d1d1d; border-radius: 8px; "
+            "outline: none; font-size: 16px; }"
+            "QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #181818; }"
+            "QListWidget::item:selected { background: #214d86; color: #ffffff; }"
+        )
+        overlay_lay.addWidget(self._cue_list_widget, stretch=1)
+
+        self._cue_list_btn = QPushButton("CUE LIST", self)
+        self._cue_list_btn.setFixedHeight(38)
+        self._cue_list_btn.setStyleSheet(
+            "QPushButton { background: #181818; color: #dcdcdc; border: 1px solid #2a2a2a; "
+            "border-radius: 8px; padding: 0 14px; font-size: 12px; font-weight: bold; letter-spacing: 2px; }"
+            "QPushButton:hover { background: #222222; }"
+            "QPushButton:pressed { background: #101010; }"
+        )
+        self._cue_list_btn.clicked.connect(self._toggle_cue_overlay)
 
         # Clock timer
         self._clock_timer = QTimer(self)
@@ -230,10 +348,19 @@ class PerformanceView(QWidget):
             self._logo_lbl.setVisible(False)
 
     def update_display(self, current_cue, next_cue, countdown: Optional[float],
-                       tc_str: str, current_group: str = "", next_group: str = ""):
+                       tc_str: str, current_group: str = "", next_group: str = "",
+                       fps: Optional[float] = None, cues: Optional[List] = None):
         self._tc_overlay.setText(tc_str)
+        self._tc_header_lbl.setText(tc_str)
+        if fps is not None:
+            self._fps = fps
+        self._fps_lbl.setText(f"FPS {self._fps:.2f}")
+        if cues is not None:
+            self.set_cues(cues)
         self._curr_group.setText(f"[{current_group}]" if current_group else "")
         self._next_group.setText(f"[{next_group}]" if next_group else "")
+        self._current_cue_index = current_cue.index if current_cue else -1
+        self._refresh_cue_overlay_selection()
 
         if current_cue:
             self._curr_name.setText(current_cue.name or "—")
@@ -260,6 +387,67 @@ class PerformanceView(QWidget):
             self._countdown_lbl.setStyleSheet(f"color: {color};")
         else:
             self._countdown_lbl.setText("")
+
+    def update_signal_state(self, signal_ok: bool, db: float, warning: str = ""):
+        self._signal_ok = signal_ok
+        self._signal_db = db
+        self._signal_warning = warning
+
+        if db <= -120:
+            db_text = "−∞ dB"
+        else:
+            db_text = f"{db:.1f} dB"
+        self._signal_level_lbl.setText(db_text)
+
+        if warning == "Clipping!":
+            state_text = "CLIPPING"
+            state_color = "#dc4040"
+            level_color = "#dc4040"
+            dot_color = "#dc4040"
+        elif warning == "Weak signal":
+            state_text = "WEAK"
+            state_color = "#d6a638"
+            level_color = "#d6a638"
+            dot_color = "#d6a638"
+        elif signal_ok:
+            state_text = "LIVE"
+            state_color = "#4bc373"
+            level_color = "#dcdcdc"
+            dot_color = "#4bc373"
+        else:
+            state_text = "NO SIGNAL"
+            state_color = "#d75a5a"
+            level_color = "#7a7a7a"
+            dot_color = "#d75a5a"
+
+        self._signal_state_lbl.setText(state_text)
+        self._signal_state_lbl.setStyleSheet(f"color: {state_color};")
+        self._signal_level_lbl.setStyleSheet(f"color: {level_color};")
+        self._signal_dot_lbl.setStyleSheet(f"color: {dot_color}; font-size: 18px;")
+
+    def set_cues(self, cues: List):
+        self._cues = list(cues)
+        self._cue_list_widget.clear()
+        for cue in self._cues:
+            if getattr(cue, "is_divider", False):
+                text = f"[SECTION] {cue.name}"
+            else:
+                tc = cue.timecode or "--:--:--:--"
+                text = f"{tc}   {cue.name or '—'}"
+            item = QListWidgetItem(text)
+            if getattr(cue, "is_divider", False):
+                item.setForeground(QColor("#c7d0f5"))
+                item.setBackground(QColor("#182038"))
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+            elif getattr(cue, "color", ""):
+                cue_color = _named_color(getattr(cue, "color", ""))
+                if cue_color is not None:
+                    item.setBackground(cue_color.darker(260))
+                    item.setForeground(QColor("#f0f0f0"))
+            self._cue_list_widget.addItem(item)
+        self._refresh_cue_overlay_selection()
 
     # ── internal ──────────────────────────────────────────────────────────────
 
@@ -314,7 +502,7 @@ class PerformanceView(QWidget):
                 name = self._operator_names[i]
                 comment = comments.get(name, "")
                 if comment:
-                    lbl.setText(f"{name}: {comment}")
+                    lbl.setText(f"{name}:\n{comment}")
                     lbl.setVisible(True)
                 else:
                     lbl.setVisible(False)
@@ -324,6 +512,30 @@ class PerformanceView(QWidget):
     def _clear_next_ops(self):
         for lbl in self._next_op_labels:
             lbl.setVisible(False)
+
+    def _toggle_cue_overlay(self):
+        if self._cue_overlay.isVisible():
+            self._hide_cue_overlay()
+        else:
+            self._show_cue_overlay()
+
+    def _show_cue_overlay(self):
+        self._refresh_cue_overlay_selection()
+        self._cue_overlay.show()
+        self._cue_overlay.raise_()
+
+    def _hide_cue_overlay(self):
+        self._cue_overlay.hide()
+
+    def _refresh_cue_overlay_selection(self):
+        row = self._current_cue_index - 1 if self._current_cue_index > 0 else -1
+        self._cue_list_widget.blockSignals(True)
+        self._cue_list_widget.clearSelection()
+        if 0 <= row < self._cue_list_widget.count():
+            item = self._cue_list_widget.item(row)
+            item.setSelected(True)
+            self._cue_list_widget.scrollToItem(item, QListWidget.ScrollHint.PositionAtCenter)
+        self._cue_list_widget.blockSignals(False)
 
     # ── layout ────────────────────────────────────────────────────────────────
 
@@ -341,6 +553,21 @@ class PerformanceView(QWidget):
         self._copyright_lbl.move(
             (W - self._copyright_lbl.width()) // 2,
             H - self._copyright_lbl.height() - 14,
+        )
+
+        overlay_w = min(760, max(420, W - 140))
+        overlay_h = min(720, max(260, H - 140))
+        self._cue_overlay.setGeometry(
+            (W - overlay_w) // 2,
+            (H - overlay_h) // 2,
+            overlay_w,
+            overlay_h,
+        )
+
+        self._cue_list_btn.adjustSize()
+        self._cue_list_btn.move(
+            W - self._cue_list_btn.width() - 20,
+            H - self._cue_list_btn.height() - 20,
         )
 
 
@@ -382,3 +609,8 @@ class _OperatorCard(QWidget):
     def set_comment(self, text: str):
         self._comment_lbl.setText(text)
         self.setVisible(bool(text))
+
+
+def _named_color(name: str) -> Optional[QColor]:
+    value = _CUE_COLORS.get(name.lower().strip())
+    return QColor(value) if value else None

@@ -3,7 +3,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QStyledItemDelegate,
-    QComboBox, QStyleOptionViewItem, QLabel, QLineEdit,
+    QComboBox, QStyleOptionViewItem, QLabel, QLineEdit, QPlainTextEdit,
     QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QRect
@@ -278,6 +278,10 @@ class CueTable(QTableWidget):
 
     def load_cues(self, cues: List[Cue]):
         self._cues = cues
+        self._collapsed_groups = {
+            row for row in self._collapsed_groups
+            if 0 <= row < len(cues) and cues[row].is_divider
+        }
         self._compute_duplicates(cues)
         self._highlighted_siblings = []
         self._block_signal = True
@@ -316,10 +320,13 @@ class CueTable(QTableWidget):
             item = self.item(row, col)
             if item is None:
                 item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
                 self.setItem(row, col, item)
             else:
                 item.setText(text)
+            if col == 0:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             if col in (0, 1):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             if col == 1 and is_dup:
@@ -349,6 +356,11 @@ class CueTable(QTableWidget):
         self._apply_styles(self._cues, None, 0)
 
     def _apply_collapse(self):
+        if self._edit_mode:
+            for row in range(self.rowCount()):
+                self.setRowHidden(row, False)
+            return
+
         hiding = False
         for row in range(self.rowCount()):
             if row < len(self._cues) and self._cues[row].is_divider:
@@ -368,6 +380,22 @@ class CueTable(QTableWidget):
                 self._open_timecode_editor(idx.row())
                 return
         super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event):
+        idx = self.indexAt(event.pos())
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and idx.isValid()
+            and idx.row() < len(self._cues)
+        ):
+            cue = self._cues[idx.row()]
+            # Divider rows show a fold arrow in the first column; make that
+            # arrow behave like a real disclosure control on single click.
+            if cue.is_divider and not self._edit_mode and idx.column() == 0:
+                self.toggle_group(idx.row())
+                self.setCurrentCell(idx.row(), idx.column())
+                return
+        super().mousePressEvent(event)
 
     def _open_timecode_editor(self, row: int):
         cue = self._cues[row]
@@ -463,6 +491,7 @@ class CueTable(QTableWidget):
             )
         else:
             self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._apply_collapse()
 
     def _on_item_changed(self, item: QTableWidgetItem):
         if self._block_signal or not self._edit_mode:
@@ -532,7 +561,7 @@ class OperatorEditPanel(QFrame):
         )
         self._current_row = -1
         self._operator_names: List[str] = []
-        self._fields: Dict[str, QLineEdit] = {}
+        self._fields: Dict[str, _OperatorCommentEdit] = {}
         self._field_widgets: list = []
 
         self._root_lay = QVBoxLayout(self)
@@ -571,12 +600,13 @@ class OperatorEditPanel(QFrame):
             lbl.setStyleSheet("color: #8888cc; font-size: 11px; font-weight: bold;")
             row_lay.addWidget(lbl)
 
-            edit = QLineEdit()
-            edit.setPlaceholderText(f"...")
+            edit = _OperatorCommentEdit()
+            edit.setPlaceholderText("Multi-line comment")
+            edit.setFixedHeight(58)
             edit.setStyleSheet(
-                "QLineEdit { background: #222; color: #ddd; border: 1px solid #3a3a3a; "
-                "border-radius: 3px; padding: 2px 6px; font-size: 12px; }"
-                "QLineEdit:focus { border-color: #5577bb; }"
+                "QPlainTextEdit { background: #222; color: #ddd; border: 1px solid #3a3a3a; "
+                "border-radius: 3px; padding: 4px 6px; font-size: 12px; }"
+                "QPlainTextEdit:focus { border-color: #5577bb; }"
             )
             edit.editingFinished.connect(lambda n=name, e=edit: self._on_edit(n, e))
             row_lay.addWidget(edit)
@@ -585,14 +615,14 @@ class OperatorEditPanel(QFrame):
             self._fields_lay.addWidget(row_w)
             self._field_widgets.append(row_w)
 
-        h = 28 + len(operator_names) * 28 if operator_names else 0
+        h = 34 + len(operator_names) * 64 if operator_names else 0
         self.setFixedHeight(h)
 
     def show_for_cue(self, row: int, cue: Cue):
         self._current_row = row
         for name, edit in self._fields.items():
             edit.blockSignals(True)
-            edit.setText(cue.operator_comments.get(name, ""))
+            edit.setPlainText(cue.operator_comments.get(name, ""))
             edit.blockSignals(False)
         self.setVisible(bool(self._operator_names))
 
@@ -600,9 +630,9 @@ class OperatorEditPanel(QFrame):
         self._current_row = -1
         self.setVisible(False)
 
-    def _on_edit(self, op_name: str, edit: QLineEdit):
+    def _on_edit(self, op_name: str, edit: "_OperatorCommentEdit"):
         if self._current_row >= 0:
-            self.operator_changed.emit(self._current_row, op_name, edit.text().strip())
+            self.operator_changed.emit(self._current_row, op_name, edit.toPlainText().strip())
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -612,6 +642,14 @@ def _bold(item: QTableWidgetItem, bold: bool):
     if f.bold() != bold:
         f.setBold(bold)
         item.setFont(f)
+
+
+class _OperatorCommentEdit(QPlainTextEdit):
+    editingFinished = pyqtSignal()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.editingFinished.emit()
 
 
 class CueEditToolbar(QWidget):

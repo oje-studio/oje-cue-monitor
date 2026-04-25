@@ -12,6 +12,9 @@ from typing import List, Optional, Dict
 
 @dataclass
 class ShowSettings:
+    # Show metadata
+    show_title: str = ""
+
     # Audio
     audio_device_name: str = ""
     audio_channel: int = 0
@@ -21,6 +24,9 @@ class ShowSettings:
 
     # Operators (global list)
     operator_names: List[str] = dc_field(default_factory=lambda: ["Operator 1"])
+
+    # Web remote
+    remote_password: str = ""
 
     # Performance mode fonts
     perf_cue_name_size: int = 56
@@ -59,10 +65,12 @@ class ShowFile:
         data = {
             "version": 1,
             "settings": {
+                "show_title": self.settings.show_title,
                 "audio_device_name": self.settings.audio_device_name,
                 "audio_channel": self.settings.audio_channel,
                 "logo_path": self.settings.logo_path,
                 "operator_names": self.settings.operator_names,
+                "remote_password": self.settings.remote_password,
                 "perf_cue_name_size": self.settings.perf_cue_name_size,
                 "perf_cue_desc_size": self.settings.perf_cue_desc_size,
                 "perf_operator_size": self.settings.perf_operator_size,
@@ -96,10 +104,12 @@ class ShowFile:
 
         s = data.get("settings", {})
         settings = ShowSettings(
+            show_title=s.get("show_title", ""),
             audio_device_name=s.get("audio_device_name", ""),
             audio_channel=s.get("audio_channel", 0),
             logo_path=s.get("logo_path", ""),
             operator_names=s.get("operator_names", ["Operator 1"]),
+            remote_password=s.get("remote_password", ""),
             perf_cue_name_size=s.get("perf_cue_name_size", 56),
             perf_cue_desc_size=s.get("perf_cue_desc_size", 26),
             perf_operator_size=s.get("perf_operator_size", 20),
