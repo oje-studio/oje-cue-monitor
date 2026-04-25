@@ -561,7 +561,7 @@ class OperatorEditPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
-            "OperatorEditPanel { background: #1a1a1a; border-top: 1px solid #333; }"
+            "OperatorEditPanel { background: #1a1a1a; border-left: 1px solid #333; }"
         )
         self._current_row = -1
         self._operator_names: List[str] = []
@@ -569,8 +569,8 @@ class OperatorEditPanel(QFrame):
         self._field_widgets: list = []
 
         self._root_lay = QVBoxLayout(self)
-        self._root_lay.setContentsMargins(12, 6, 12, 6)
-        self._root_lay.setSpacing(3)
+        self._root_lay.setContentsMargins(12, 8, 12, 8)
+        self._root_lay.setSpacing(6)
 
         self._title = QLabel("OPERATOR COMMENTS")
         self._title.setStyleSheet(
@@ -578,35 +578,52 @@ class OperatorEditPanel(QFrame):
         )
         self._root_lay.addWidget(self._title)
 
+        # Scroll area lets the panel handle many operators or tall comments
+        # without needing a fixed pixel height (which used to fight with the
+        # splitter that owns this widget).
+        from PyQt6.QtWidgets import QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+
         self._fields_container = QWidget()
+        self._fields_container.setStyleSheet("background: transparent;")
         self._fields_lay = QVBoxLayout(self._fields_container)
         self._fields_lay.setContentsMargins(0, 0, 0, 0)
-        self._fields_lay.setSpacing(2)
-        self._root_lay.addWidget(self._fields_container)
+        self._fields_lay.setSpacing(8)
+        scroll.setWidget(self._fields_container)
+        self._root_lay.addWidget(scroll, 1)
+        self.setMinimumWidth(280)
 
     def set_operators(self, operator_names: List[str]):
         self._operator_names = operator_names
-        # Clear existing
-        for w in self._field_widgets:
-            w.setParent(None)
-            w.deleteLater()
+        # Clear existing widgets AND any leftover stretch so the previous
+        # bottom-spacer doesn't accumulate across rebuilds.
+        while self._fields_lay.count():
+            item = self._fields_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
         self._field_widgets.clear()
         self._fields.clear()
 
         for name in operator_names:
             row_w = QWidget()
-            row_lay = QHBoxLayout(row_w)
+            row_lay = QVBoxLayout(row_w)
             row_lay.setContentsMargins(0, 0, 0, 0)
-            row_lay.setSpacing(8)
+            row_lay.setSpacing(2)
 
-            lbl = QLabel(name)
-            lbl.setFixedWidth(110)
-            lbl.setStyleSheet("color: #8888cc; font-size: 11px; font-weight: bold;")
+            lbl = QLabel(name.upper())
+            lbl.setStyleSheet(
+                "color: #8888cc; font-size: 10px; font-weight: bold; letter-spacing: 1.5px;"
+            )
             row_lay.addWidget(lbl)
 
             edit = _OperatorCommentEdit()
-            edit.setPlaceholderText("Multi-line comment")
-            edit.setFixedHeight(58)
+            edit.setPlaceholderText("Multi-line comment…")
+            edit.setMinimumHeight(58)
             edit.setStyleSheet(
                 "QPlainTextEdit { background: #222; color: #ddd; border: 1px solid #3a3a3a; "
                 "border-radius: 3px; padding: 4px 6px; font-size: 12px; }"
@@ -619,8 +636,11 @@ class OperatorEditPanel(QFrame):
             self._fields_lay.addWidget(row_w)
             self._field_widgets.append(row_w)
 
-        h = 34 + len(operator_names) * 64 if operator_names else 0
-        self.setFixedHeight(h)
+        # Bottom stretch keeps operator rows pinned at the top instead of
+        # the QPlainTextEdits ballooning to fill an oversized panel.
+        self._fields_lay.addStretch(1)
+        # Don't lock our height — the splitter owns it.
+        self.setMinimumHeight(0)
 
     def show_for_cue(self, row: int, cue: Cue):
         self._current_row = row
