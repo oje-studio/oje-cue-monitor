@@ -578,6 +578,44 @@ class CueTable(QTableWidget):
                 return
         super().mousePressEvent(event)
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount() != 0:
+            return
+        # Empty-state placeholder.  An untouched QTableWidget with no
+        # rows is a blank charcoal slab — readable, but it gives the
+        # operator no clue what they're meant to do.  A short, dim
+        # two-line message at the centre points to the two normal
+        # ways to populate the list.
+        painter = QPainter(self.viewport())
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = self.viewport().rect()
+            center_y = rect.center().y()
+
+            head_font = QFont(); head_font.setPointSize(15); head_font.setBold(True)
+            sub_font  = QFont(); sub_font.setPointSize(11)
+
+            painter.setPen(QColor(theme.TEXT_MUTED))
+            painter.setFont(head_font)
+            head_h = painter.fontMetrics().height()
+            painter.drawText(
+                QRect(rect.x(), center_y - head_h, rect.width(), head_h),
+                Qt.AlignmentFlag.AlignCenter,
+                "No cues yet",
+            )
+
+            painter.setPen(QColor(theme.TEXT_DIM))
+            painter.setFont(sub_font)
+            sub_h = painter.fontMetrics().height()
+            painter.drawText(
+                QRect(rect.x(), center_y + 4, rect.width(), sub_h),
+                Qt.AlignmentFlag.AlignCenter,
+                "Add one with + in Edit Cues, or open a .ojeshow / .csv from File.",
+            )
+        finally:
+            painter.end()
+
     def _open_timecode_editor(self, row: int):
         cue = self._cues[row]
         item = self.item(row, 1)
