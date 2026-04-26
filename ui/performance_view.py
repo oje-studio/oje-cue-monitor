@@ -15,6 +15,46 @@ from ui.fonts import mono_font, sans_font
 APP_NAME  = "ØJE CUE MONITOR"
 COPYRIGHT = "© 2026 ØJE Studio"
 
+
+class _PerfVUMeter(QWidget):
+    """5-bar LED-style level meter for the Performance status bar.
+    Matches the meter in the main edit window so the operator sees the
+    same shape on both screens.
+    """
+    BARS = 5
+    _GREEN  = QColor(75, 195, 115)
+    _AMBER  = QColor(225, 135, 48)
+    _RED    = QColor(215, 75, 75)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._db = -120.0
+        self.setFixedSize(72, 22)
+
+    def set_db(self, db: float):
+        self._db = db
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        W, H = self.width(), self.height()
+        bw = (W - (self.BARS - 1) * 2) // self.BARS
+        # Map -60..0 dBFS onto 0..BARS so the rightmost bar lights only
+        # near clipping. Anything quieter than -60 dB is dark.
+        norm = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
+        lit = int(norm * self.BARS)
+        for i in range(self.BARS):
+            x = i * (bw + 2)
+            if i >= self.BARS - 1:
+                c = self._RED if i < lit else QColor(60, 20, 20)
+            elif i >= self.BARS - 2:
+                c = self._AMBER if i < lit else QColor(55, 40, 15)
+            else:
+                c = self._GREEN if i < lit else QColor(25, 55, 35)
+            p.fillRect(x, 2, bw, H - 4, c)
+        p.end()
+
+
 _CUE_COLORS = {
     "red": "#af3030",
     "dark red": "#781919",
@@ -104,8 +144,12 @@ class PerformanceView(QWidget):
         self._sep_level.setStyleSheet("color: #3d3d3d; font-size: 18px;")
         tb_lay.addWidget(self._sep_level, alignment=Qt.AlignmentFlag.AlignVCenter)
 
+        # Visual VU meter — same style as the meter in the main edit window.
+        self._vu = _PerfVUMeter()
+        tb_lay.addWidget(self._vu, alignment=Qt.AlignmentFlag.AlignVCenter)
+
         self._signal_level_lbl = QLabel("−∞ dB")
-        self._signal_level_lbl.setFont(mono_font(15, bold=True))
+        self._signal_level_lbl.setFont(mono_font(13, bold=True))
         self._signal_level_lbl.setStyleSheet("color: #7a7a7a;")
         tb_lay.addWidget(self._signal_level_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
@@ -398,6 +442,7 @@ class PerformanceView(QWidget):
         else:
             db_text = f"{db:.1f} dB"
         self._signal_level_lbl.setText(db_text)
+        self._vu.set_db(db)
 
         if warning == "Clipping!":
             state_text = "CLIPPING"

@@ -312,48 +312,62 @@ body {{
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    /* nowrap — Access button used to wrap onto a second row on phones,
-       which doubled the status bar height and pushed the bottom strip
-       under iOS Safari's toolbar. */
+    gap: 12px;
     flex-wrap: nowrap;
-    min-height: 48px;
+    min-height: 54px;
     overflow: hidden;
 }}
 .statusbar .dot {{
     color: #d75a5a;
-    font-size: 16px;
+    font-size: 18px;
     line-height: 1;
 }}
 .statusbar .dot.ok {{ color: #4bc373; }}
 .statusbar .tc {{
-    font-family: 'Menlo', 'Courier New', monospace;
-    font-size: clamp(20px, 5vw, 28px);
-    font-weight: 700;
+    font-family: 'Menlo', 'SF Mono', 'Courier New', monospace;
+    font-size: clamp(22px, 5.5vw, 30px);
+    font-weight: 800;
     color: #f0f0f0;
     letter-spacing: 0.5px;
-    /* Reserve max width for HH:MM:SS:FF so the bar doesn't reflow when
-       the value goes from "--" to "10:00:00:00". */
     min-width: 9.5ch;
     text-align: center;
 }}
 .statusbar .meta {{
-    font-family: 'Menlo', monospace;
-    font-size: clamp(12px, 2.6vw, 14px);
-    font-weight: 700;
+    font-family: 'Menlo', 'SF Mono', monospace;
+    font-size: clamp(13px, 2.8vw, 15px);
+    font-weight: 800;
     color: #858585;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.5px;
     white-space: nowrap;
 }}
 .statusbar .clock {{
-    font-family: 'Menlo', monospace;
-    font-size: clamp(16px, 3.5vw, 22px);
-    font-weight: 700;
+    font-family: 'Menlo', 'SF Mono', monospace;
+    font-size: clamp(18px, 4vw, 24px);
+    font-weight: 800;
     color: #dcdcdc;
     min-width: 8ch;
     text-align: center;
 }}
-.statusbar .sep {{ color: #3d3d3d; font-size: 14px; }}
+.statusbar .sep {{ color: #3d3d3d; font-size: 16px; }}
+
+/* ── 5-bar VU meter (CSS only, mirrors the Mac one) ─────────────────────── */
+.vu {{
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 18px;
+}}
+.vu .bar {{
+    width: 10px;
+    height: 100%;
+    border-radius: 1px;
+    background: #1a3320;          /* dark green when unlit */
+}}
+.vu .bar:nth-child(4) {{ background: #37280f; }}     /* amber slot, unlit */
+.vu .bar:nth-child(5) {{ background: #3c1414; }}     /* red slot, unlit */
+.vu .bar.lit:nth-child(-n+3) {{ background: #4bc373; }}
+.vu .bar.lit:nth-child(4)    {{ background: #e18730; }}
+.vu .bar.lit:nth-child(5)    {{ background: #d74b4b; }}
 
 /* ── Main current-cue area — fills remaining height ──────────────────────── */
 .main {{
@@ -609,12 +623,15 @@ body {{
         min-height: 40px;
     }}
     .statusbar .sep,
-    .statusbar #fps {{
-        display: none;       /* keep TC + signal state + clock — drop FPS for space */
+    .statusbar #fps,
+    .statusbar #signal-db {{
+        display: none;       /* keep TC + state + VU + clock — drop FPS, dB text, separators */
     }}
-    .statusbar .tc {{ font-size: 18px; min-width: 0; }}
+    .statusbar .tc {{ font-size: 20px; min-width: 0; }}
     .statusbar .clock {{ font-size: 14px; min-width: 0; }}
     .statusbar .meta {{ font-size: 11px; }}
+    .vu {{ height: 14px; gap: 1px; }}
+    .vu .bar {{ width: 7px; }}
     .access-pill {{
         top: calc(env(safe-area-inset-top, 0px) + 4px);
         right: calc(env(safe-area-inset-right, 0px) + 8px);
@@ -665,6 +682,13 @@ body {{
     <span class="sep">|</span>
     <span class="meta" id="signal-state">NO SIGNAL</span>
     <span class="sep">|</span>
+    <span class="vu" id="vu" aria-label="Audio level">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+    </span>
     <span class="meta" id="signal-db">−∞ dB</span>
     <span class="sep">|</span>
     <span class="clock" id="clock">--:--:--</span>
@@ -759,20 +783,22 @@ function render(state) {{
     document.getElementById('fps').textContent =
         (typeof fps === 'number' && fps > 0) ? 'FPS ' + fps.toFixed(2) : 'FPS --';
 
-    // dB level
+    // dB level + VU meter (5 bars, same mapping as the Mac meter:
+    //   -60 dBFS → 0 lit, 0 dBFS → 5 lit, last bar = clip indicator)
     const db = state.db;
     const dbEl = document.getElementById('signal-db');
+    const vuBars = document.querySelectorAll('#vu .bar');
+    let lit = 0;
     if (typeof db === 'number' && db > -120) {{
         dbEl.textContent = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
-        // Colour follows the same banding as the Mac VU meter:
-        //   above -3 dBFS → red (clipping)
-        //   above -12 dBFS → amber (good level)
-        //   below          → grey
-        dbEl.style.color = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#7a7a7a');
+        dbEl.style.color = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#dcdcdc');
+        const norm = Math.max(0, Math.min(1, (db + 60) / 60));
+        lit = Math.round(norm * vuBars.length);
     }} else {{
         dbEl.textContent = '−∞ dB';
         dbEl.style.color = '#7a7a7a';
     }}
+    vuBars.forEach((b, i) => b.classList.toggle('lit', i < lit));
 
     const cur = state.current_cue;
     if (cur) {{
