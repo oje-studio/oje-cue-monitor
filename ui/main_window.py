@@ -1805,15 +1805,46 @@ def _hline() -> QFrame:
     return f
 
 
+def _logo_pixmap(color_hex: str, size: int) -> QPixmap:
+    """
+    Load assets/logo_src.png, recolour every non-transparent pixel to
+    `color_hex`, and scale to `size × size`.  CompositionMode_SourceIn
+    keeps the glyph silhouette and replaces its colour — the studio
+    Ø is orange in the source file but lives on a dark header here,
+    so it has to retint at runtime.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    src_path = os.path.join(os.path.dirname(here), "assets", "logo_src.png")
+    src = QPixmap(src_path)
+    if src.isNull():
+        return QPixmap()
+    # Render at 2× then downscale so HiDPI displays still get crisp
+    # edges; PyQt picks up the high-res variant via QPixmap automatic
+    # devicePixelRatio handling.
+    scaled = src.scaled(
+        size * 2, size * 2,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    out = QPixmap(scaled.size())
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.drawPixmap(0, 0, scaled)
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    p.fillRect(out.rect(), QColor(color_hex))
+    p.end()
+    return out
+
+
 class BrandMark(QWidget):
     """
-    The studio mark (white "ØJE" square) followed by the product
-    name and version.  One reusable widget so the same brand block
-    can land in the header, the About dialog, the PDF cover, etc.
-    without each surface re-implementing the typography.
+    Studio Ø glyph (recoloured from assets/logo_src.png) followed by
+    the product name and version.  One reusable widget so the same
+    brand block can land in the header, the About dialog, the PDF
+    cover, etc. without each surface re-implementing the typography.
 
     Tokens:
-      square      theme.BRAND_MARK_BG / BRAND_MARK_FG / BRAND_MARK_SIZE
+      mark        theme.BRAND_MARK_COLOR / BRAND_MARK_SIZE
       product     theme.TEXT_BRIGHT (semibold, tracked)
       version     theme.TEXT_MUTED  (regular)
     """
@@ -1825,15 +1856,10 @@ class BrandMark(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        mark = QLabel("ØJE")
+        mark = QLabel()
         mark.setFixedSize(theme.BRAND_MARK_SIZE, theme.BRAND_MARK_SIZE)
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mark.setStyleSheet(
-            f"background: {theme.BRAND_MARK_BG}; "
-            f"color: {theme.BRAND_MARK_FG}; "
-            f"border-radius: {theme.RADIUS_SM}px; "
-            "font-weight: 800; font-size: 10px; letter-spacing: 0.5px;"
-        )
+        mark.setPixmap(_logo_pixmap(theme.BRAND_MARK_COLOR, theme.BRAND_MARK_SIZE))
+        mark.setScaledContents(True)
         lay.addWidget(mark, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         name = QLabel(product)

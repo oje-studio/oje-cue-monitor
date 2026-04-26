@@ -159,9 +159,11 @@ WEIGHT_SEMIBOLD = 600
 WEIGHT_BOLD    = 700
 
 # ── Brand ─────────────────────────────────────────────────────────────
-BRAND_MARK_BG   = "#ffffff"
-BRAND_MARK_FG   = "#000000"
-BRAND_MARK_SIZE = 26
+# The brand mark is the studio "Ø" glyph from assets/logo_src.png,
+# rendered tinted to BRAND_MARK_COLOR.  No background fill — the
+# glyph itself is the mark and lives directly on the dark header.
+BRAND_MARK_COLOR = "#ffffff"
+BRAND_MARK_SIZE  = 26
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
