@@ -312,7 +312,12 @@ class PerformanceView(QWidget):
         # ── Floating overlays ─────────────────────────────────────────────────
         self._tc_overlay = QLabel("--:--:--:--", self)
         self._tc_overlay.setFont(mono_font(13))
-        self._tc_overlay.setStyleSheet("color: #2a2a2a; background: transparent;")
+        # Deliberately dim — a subtle floating reminder of the show
+        # TC, not a primary readout (the big TC lives in the status
+        # bar at the top).  TEXT_DISABLED keeps it whisper-quiet.
+        self._tc_overlay.setStyleSheet(
+            f"color: {theme.TEXT_DISABLED}; background: transparent;"
+        )
         self._tc_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._tc_overlay.hide()
 
@@ -320,8 +325,12 @@ class PerformanceView(QWidget):
         # Two states: bright on mouse activity (and right after entering
         # the view), then fades to a barely-visible dim state ~3 s later
         # so it stays out of the operator's way during the show.
-        self._ESC_HINT_BRIGHT = "color: #b0b0b0; font-size: 12px; background: transparent;"
-        self._ESC_HINT_DIM    = "color: #2a2a2a; font-size: 11px; background: transparent;"
+        self._ESC_HINT_BRIGHT = (
+            f"color: {theme.TEXT_MUTED}; font-size: 12px; background: transparent;"
+        )
+        self._ESC_HINT_DIM    = (
+            f"color: {theme.TEXT_DISABLED}; font-size: 11px; background: transparent;"
+        )
         self._esc_hint.setStyleSheet(self._ESC_HINT_BRIGHT)
         self._esc_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -378,10 +387,14 @@ class PerformanceView(QWidget):
         self._cue_list_btn = QPushButton("CUE LIST", self)
         self._cue_list_btn.setFixedHeight(38)
         self._cue_list_btn.setStyleSheet(
-            "QPushButton { background: #181818; color: #dcdcdc; border: 1px solid #2a2a2a; "
-            "border-radius: 8px; padding: 0 14px; font-size: 12px; font-weight: bold; letter-spacing: 2px; }"
-            "QPushButton:hover { background: #222222; }"
-            "QPushButton:pressed { background: #101010; }"
+            f"QPushButton {{ background: {theme.BG_RAISED}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; padding: 0 14px; "
+            "font-size: 12px; font-weight: 600; letter-spacing: 2px; }}"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
+            f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
         )
         self._cue_list_btn.clicked.connect(self._toggle_cue_overlay)
 
