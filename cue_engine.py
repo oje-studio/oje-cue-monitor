@@ -18,10 +18,6 @@ class Cue:
     group: str = ""
     operator_comments: Dict[str, str] = dc_field(default_factory=dict)
     is_divider: bool = False
-    # Mirrors ShowCue.section_color so render call sites (PDF
-    # export) don't need to reach back into the show file.  Empty
-    # for non-dividers and for dividers without an explicit colour.
-    section_color: str = ""
 
     @property
     def has_timecode(self) -> bool:
@@ -116,7 +112,6 @@ class CueEngine:
                 group=sc.group,
                 operator_comments=dict(sc.operator_comments),
                 is_divider=is_divider,
-                section_color=getattr(sc, "section_color", "") or "",
             ))
 
         for i, c in enumerate(cues):
@@ -136,7 +131,6 @@ class CueEngine:
                 group=cue.group,
                 operator_comments=dict(cue.operator_comments),
                 is_divider=cue.is_divider,
-                section_color=cue.section_color,
             ))
         return result
 

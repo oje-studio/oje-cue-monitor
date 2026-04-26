@@ -56,11 +56,6 @@ class ShowCue:
     group: str = ""
     operator_comments: Dict[str, str] = dc_field(default_factory=dict)
     is_divider: bool = False
-    # Per-section accent colour (only meaningful on divider rows).
-    # Hex string like "#1a1a2a" — empty string means "use the
-    # default section colour at render time" so legacy .ojeshow
-    # files keep working without migration.
-    section_color: str = ""
 
 
 @dataclass
@@ -101,7 +96,6 @@ class ShowFile:
                     "group": c.group,
                     "operator_comments": c.operator_comments,
                     "is_divider": c.is_divider,
-                    "section_color": c.section_color,
                 }
                 for c in self.cues
             ],
@@ -144,7 +138,6 @@ class ShowFile:
                 group=cd.get("group", ""),
                 operator_comments=cd.get("operator_comments", {}),
                 is_divider=cd.get("is_divider", False),
-                section_color=cd.get("section_color", ""),
             ))
 
         show = cls(settings=settings, cues=cues, file_path=path)
