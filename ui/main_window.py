@@ -29,6 +29,7 @@ from ui.fonts import mono_font, sans_font
 from ui.performance_view import PerformanceView
 from ui.settings_dialog import SettingsDialog
 from ui.remote_panel import RemotePanel
+from ui import theme
 from web_remote import WebRemoteServer
 
 logger = logging.getLogger(__name__)
@@ -1629,53 +1630,64 @@ Generated {html.escape(generated_at)}<br>
         lay.addWidget(_hline())
 
         _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
+        # Inline <style> keeps the markup readable — kbd, headings, and
+        # body text reuse design-system tokens instead of repeating
+        # hex literals on every <td>.
+        kbd = (
+            f"color:{theme.SEMANTIC_INFO}; font-weight:bold; "
+            f"font-family:'Menlo','Consolas',monospace;"
+        )
+        h_color = theme.TEXT_PRIMARY
+        body_color = theme.TEXT_PRIMARY
+        muted_color = theme.TEXT_MUTED
+        warn_color = theme.SEMANTIC_WARNING
         help_text = (
-            "<h3 style='color:#dcdcdc;'>Keyboard Shortcuts</h3>"
-            "<table cellpadding='4' style='color:#ccc; font-size:13px;'>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+N</td>"
+            f"<h3 style='color:{h_color};'>Keyboard Shortcuts</h3>"
+            f"<table cellpadding='4' style='color:{body_color}; font-size:13px;'>"
+            f"<tr><td style='{kbd}'>{_mod}+N</td>"
             "    <td>New show</td></tr>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+O</td>"
+            f"<tr><td style='{kbd}'>{_mod}+O</td>"
             "    <td>Open show file / import CSV</td></tr>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+S</td>"
+            f"<tr><td style='{kbd}'>{_mod}+S</td>"
             "    <td>Save show</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>P</td>"
+            f"<tr><td style='{kbd}'>P</td>"
             "    <td>Toggle Performance Mode</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Escape</td>"
+            f"<tr><td style='{kbd}'>Escape</td>"
             "    <td>Exit Performance Mode</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Space</td>"
+            f"<tr><td style='{kbd}'>Space</td>"
             "    <td>Manual cue mark (logged)</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>F1</td>"
+            f"<tr><td style='{kbd}'>F1</td>"
             "    <td>This help window</td></tr>"
             "</table>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Edit Mode</h3>"
-            "<table cellpadding='4' style='color:#ccc; font-size:13px;'>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>+ Cue</td>"
+            f"<h3 style='color:{h_color};'>Edit Mode</h3>"
+            f"<table cellpadding='4' style='color:{body_color}; font-size:13px;'>"
+            f"<tr><td style='{kbd}'>+ Cue</td>"
             "    <td>Add cue after selection</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>+ Section</td>"
+            f"<tr><td style='{kbd}'>+ Section</td>"
             "    <td>Add section divider</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Delete</td>"
+            f"<tr><td style='{kbd}'>Delete</td>"
             "    <td>Delete selected rows (multi-select)</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Up / Down</td>"
+            f"<tr><td style='{kbd}'>Up / Down</td>"
             "    <td>Move selected cue</td></tr>"
             "</table>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Show File (.ojeshow)</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>Show File (.ojeshow)</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "A single JSON file containing all settings (audio device, operators, "
             "font sizes, logo) and the complete cue list. Replaces the legacy CSV format. "
             "Auto-saved when exiting Edit Mode.</p>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>LTC Timecode</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>LTC Timecode</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "Connect an LTC/SMPTE timecode source to any audio input. "
             "Select the device and channel in Settings. Press START to begin reading. "
             "The VU meter shows input level — aim for -20 to -6 dBFS.</p>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Duplicate Timecodes</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>Duplicate Timecodes</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "Cues with identical timecodes are marked with a "
-            "<span style='color:#e6c840;'>&#9888;</span> warning. "
+            f"<span style='color:{warn_color};'>&#9888;</span> warning. "
             "Only the last cue in list order will be active during playback. "
             "Click a duplicate to highlight all siblings.</p>"
         )
