@@ -562,7 +562,11 @@ class PerformanceView(QWidget):
             lbl = QLabel()
             f = QFont(); f.setPointSize(14); f.setItalic(True)
             lbl.setFont(f)
-            lbl.setStyleSheet("color: #e6c840;")
+            # Rich text so the role name can carry its semantic colour
+            # while the comment line reads in white — same split as
+            # the current-cue _OperatorCard (role-coloured header,
+            # neutral white command text).
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setWordWrap(True)
             self._next_ops_hlay.addWidget(lbl)
             self._next_op_labels.append(lbl)
@@ -598,7 +602,16 @@ class PerformanceView(QWidget):
                 name = self._operator_names[i]
                 comment = comments.get(name, "")
                 if comment:
-                    lbl.setText(f"{name}:\n{comment}")
+                    color = self._operator_color(name)
+                    # Escape angle brackets so an operator note like
+                    # "<go>" doesn't get parsed as a (broken) tag.
+                    safe_name = name.replace("<", "&lt;").replace(">", "&gt;")
+                    safe_comment = comment.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                    lbl.setText(
+                        f"<span style='color:{color}; font-weight:bold;'>"
+                        f"{safe_name.upper()}</span><br>"
+                        f"<span style='color:{theme.TEXT_BRIGHT};'>{safe_comment}</span>"
+                    )
                     lbl.setVisible(True)
                 else:
                     lbl.setVisible(False)
@@ -793,9 +806,14 @@ class _OperatorCard(QWidget):
         f_comment = QFont()
         f_comment.setPointSize(font_size)
         self._comment_lbl.setFont(f_comment)
-        # Comment text colour goes WHITE in d3; keep the existing amber
-        # for now so this step only changes the role-name colour.
-        self._comment_lbl.setStyleSheet("color: #e6c840; background: transparent;")
+        # Comment text in pure white — the colour-coded role label
+        # above already says "this is the lighting cue", so the
+        # command itself stays neutral and reads at maximum contrast
+        # against the dark card surface, important when the operator
+        # is reading from across a low-lit stage.
+        self._comment_lbl.setStyleSheet(
+            f"color: {theme.TEXT_BRIGHT}; background: transparent;"
+        )
         lay.addWidget(self._comment_lbl)
 
         # Cap the comment area at ~10 lines of base-size text. 4 was too
