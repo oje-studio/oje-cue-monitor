@@ -297,8 +297,23 @@ class PerformanceView(QWidget):
         self._tc_overlay.hide()
 
         self._esc_hint = QLabel("Esc  —  exit performance mode", self)
-        self._esc_hint.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
+        # Two states: bright on mouse activity (and right after entering
+        # the view), then fades to a barely-visible dim state ~3 s later
+        # so it stays out of the operator's way during the show.
+        self._ESC_HINT_BRIGHT = "color: #b0b0b0; font-size: 12px; background: transparent;"
+        self._ESC_HINT_DIM    = "color: #2a2a2a; font-size: 11px; background: transparent;"
+        self._esc_hint.setStyleSheet(self._ESC_HINT_BRIGHT)
         self._esc_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self._esc_hint_dim_timer = QTimer(self)
+        self._esc_hint_dim_timer.setSingleShot(True)
+        self._esc_hint_dim_timer.setInterval(3000)
+        self._esc_hint_dim_timer.timeout.connect(
+            lambda: self._esc_hint.setStyleSheet(self._ESC_HINT_DIM)
+        )
+        # Listen for mouse movement on the whole view so any operator
+        # poke wakes the hint up.
+        self.setMouseTracking(True)
 
         self._copyright_lbl = QLabel(f"{APP_NAME}  {COPYRIGHT}", self)
         self._copyright_lbl.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
@@ -589,6 +604,24 @@ class PerformanceView(QWidget):
             item.setSelected(True)
             self._cue_list_widget.scrollToItem(item, QListWidget.ScrollHint.PositionAtCenter)
         self._cue_list_widget.blockSignals(False)
+
+    # ── Esc hint visibility ───────────────────────────────────────────────────
+
+    def _wake_esc_hint(self):
+        """Brighten the hint and (re)start the fade-to-dim timer."""
+        if hasattr(self, "_esc_hint"):
+            self._esc_hint.setStyleSheet(self._ESC_HINT_BRIGHT)
+            self._esc_hint_dim_timer.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Welcome the operator into perf mode with the hint clearly
+        # readable; it'll fade after a few seconds.
+        self._wake_esc_hint()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        self._wake_esc_hint()
 
     # ── layout ────────────────────────────────────────────────────────────────
 
