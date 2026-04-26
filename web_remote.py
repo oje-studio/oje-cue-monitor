@@ -768,7 +768,12 @@ function fetchState() {{
 
 function startPolling() {{
     if (pollTimer) return;
-    pollTimer = setInterval(fetchState, 1000);
+    // 4 Hz — fast enough that the timecode digits don't visibly stutter
+    // when we're falling back to HTTP polling. Server only does work
+    // serialising the small state dict (it's a couple of hundred bytes
+    // and we already keep it in memory), so 4 Hz on the local network
+    // is cheap. WS path is still preferred.
+    pollTimer = setInterval(fetchState, 250);
 }}
 
 function stopPolling() {{
@@ -814,87 +819,116 @@ function connect() {{
     ws.onerror = () => {{ ws.close(); }};
 }}
 
+// Cheap setText helpers — skip the DOM write when the value is
+// unchanged. On a phone, render() runs ~25× per second when the WS is
+// healthy, so avoiding redundant text/styleSheet writes keeps Safari's
+// layout pipeline from getting backed up and the cards from feeling
+// jittery.
+function setText(id, value) {{
+    const el = document.getElementById(id);
+    if (el && el.textContent !== value) el.textContent = value;
+}}
+function setColor(id, color) {{
+    const el = document.getElementById(id);
+    if (el && el.style.color !== color) el.style.color = color;
+}}
+
+// Caches that stop renderOps / renderNextOps from rebuilding their
+// inner HTML when the cue id and operator-comments dict are unchanged
+// (which is most ticks — the cue only changes occasionally).
+let _curCueSig = '';
+let _nxtCueSig = '';
+let _curOpsSig = '';
+let _nxtOpsSig = '';
+
 function render(state) {{
-    document.getElementById('timecode').textContent = state.timecode || '--:--:--:--';
-    document.getElementById('cur-group').textContent = state.current_group ? '[' + state.current_group + ']' : '';
-    document.getElementById('next-group').textContent = state.next_group ? '[' + state.next_group + ']' : '';
+    setText('timecode', state.timecode || '--:--:--:--');
+    setText('cur-group', state.current_group ? '[' + state.current_group + ']' : '');
+    setText('next-group', state.next_group ? '[' + state.next_group + ']' : '');
 
     // ── Status bar ──
-    // Signal dot + state text mirror Performance Mode's three-state UI:
-    //   running + signal_ok    → green, "LIVE"
-    //   running + no signal    → red,   "NO SIGNAL"
-    //   not running             → grey,  "OFF"
     const dot = document.getElementById('signal-dot');
-    const stateLbl = document.getElementById('signal-state');
+    let dotClass, dotColor, stateText, stateColor;
     if (!state.running) {{
-        dot.className = 'dot';
-        dot.style.color = '#3d3d3d';
-        stateLbl.textContent = 'OFF';
-        stateLbl.style.color = '#555';
+        dotClass = 'dot'; dotColor = '#3d3d3d';
+        stateText = 'OFF'; stateColor = '#555';
     }} else if (state.signal_ok) {{
-        dot.className = 'dot ok';
-        dot.style.color = '';
-        stateLbl.textContent = state.signal_warning || 'LIVE';
-        stateLbl.style.color = state.signal_warning ? '#e6c840' : '#4bc373';
+        dotClass = 'dot ok'; dotColor = '';
+        stateText = state.signal_warning || 'LIVE';
+        stateColor = state.signal_warning ? '#e6c840' : '#4bc373';
     }} else {{
-        dot.className = 'dot';
-        dot.style.color = '';
-        stateLbl.textContent = 'NO SIGNAL';
-        stateLbl.style.color = '#d75a5a';
+        dotClass = 'dot'; dotColor = '';
+        stateText = 'NO SIGNAL'; stateColor = '#d75a5a';
     }}
+    if (dot.className !== dotClass) dot.className = dotClass;
+    setColor('signal-dot', dotColor);
+    setText('signal-state', stateText);
+    setColor('signal-state', stateColor);
 
     // FPS
     const fps = state.fps;
-    document.getElementById('fps').textContent =
-        (typeof fps === 'number' && fps > 0) ? 'FPS ' + fps.toFixed(2) : 'FPS --';
+    setText('fps', (typeof fps === 'number' && fps > 0)
+        ? 'FPS ' + fps.toFixed(2) : 'FPS --');
 
-    // dB level + VU meter (5 bars, same mapping as the Mac meter:
-    //   -60 dBFS → 0 lit, 0 dBFS → 5 lit, last bar = clip indicator)
+    // dB level + 5-bar VU
     const db = state.db;
-    const dbEl = document.getElementById('signal-db');
-    const vuBars = document.querySelectorAll('#vu .bar');
-    let lit = 0;
+    let dbText, dbColor, lit = 0;
     if (typeof db === 'number' && db > -120) {{
-        dbEl.textContent = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
-        dbEl.style.color = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#dcdcdc');
+        dbText = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
+        dbColor = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#dcdcdc');
         const norm = Math.max(0, Math.min(1, (db + 60) / 60));
-        lit = Math.round(norm * vuBars.length);
+        lit = Math.round(norm * 5);
     }} else {{
-        dbEl.textContent = '−∞ dB';
-        dbEl.style.color = '#7a7a7a';
+        dbText = '−∞ dB';
+        dbColor = '#7a7a7a';
     }}
-    vuBars.forEach((b, i) => b.classList.toggle('lit', i < lit));
+    setText('signal-db', dbText);
+    setColor('signal-db', dbColor);
+    const vuBars = document.querySelectorAll('#vu .bar');
+    vuBars.forEach((b, i) => {{
+        const want = i < lit;
+        if (b.classList.contains('lit') !== want) b.classList.toggle('lit', want);
+    }});
 
+    // ── Current cue ──
     const cur = state.current_cue;
-    if (cur) {{
-        document.getElementById('cur-name').textContent = cur.name || '—';
-        document.getElementById('cur-desc').textContent = cur.description || '';
-        renderOps('cur-ops', cur.operator_comments || {{}});
-    }} else {{
-        document.getElementById('cur-name').textContent = '—';
-        document.getElementById('cur-desc').textContent = '';
-        document.getElementById('cur-ops').innerHTML = '';
+    const curSig = cur ? (cur.id || '') + '|' + (cur.name || '') + '|' + (cur.description || '') : '';
+    if (curSig !== _curCueSig) {{
+        _curCueSig = curSig;
+        setText('cur-name', cur ? (cur.name || '—') : '—');
+        setText('cur-desc', cur ? (cur.description || '') : '');
+    }}
+    const curOpsSig = cur ? JSON.stringify(cur.operator_comments || {{}}) : '';
+    if (curOpsSig !== _curOpsSig) {{
+        _curOpsSig = curOpsSig;
+        renderOps('cur-ops', cur ? (cur.operator_comments || {{}}) : {{}});
     }}
 
+    // ── Next cue ──
     const nxt = state.next_cue;
-    if (nxt) {{
-        document.getElementById('next-name').textContent = nxt.name || '—';
-        document.getElementById('next-desc').textContent = nxt.description || '';
-        renderNextOps(nxt.operator_comments || {{}});
-    }} else {{
-        document.getElementById('next-name').textContent = '—';
-        document.getElementById('next-desc').textContent = '';
-        document.getElementById('next-ops').innerHTML = '';
+    const nxtSig = nxt ? (nxt.id || '') + '|' + (nxt.name || '') + '|' + (nxt.description || '') : '';
+    if (nxtSig !== _nxtCueSig) {{
+        _nxtCueSig = nxtSig;
+        setText('next-name', nxt ? (nxt.name || '—') : '—');
+        setText('next-desc', nxt ? (nxt.description || '') : '');
+    }}
+    const nxtOpsSig = nxt ? JSON.stringify(nxt.operator_comments || {{}}) : '';
+    if (nxtOpsSig !== _nxtOpsSig) {{
+        _nxtOpsSig = nxtOpsSig;
+        renderNextOps(nxt ? (nxt.operator_comments || {{}}) : {{}});
     }}
 
+    // ── Countdown ──
     const cd = state.countdown;
     const cdEl = document.getElementById('countdown');
     if (cd !== null && cd !== undefined) {{
         const m = Math.floor(cd / 60);
         const s = Math.floor(cd % 60);
-        cdEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-        cdEl.className = cd < 10 ? 'countdown urgent' : 'countdown';
-    }} else {{
+        const cdText = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+        if (cdEl.textContent !== cdText) cdEl.textContent = cdText;
+        const want = cd < 10 ? 'countdown urgent' : 'countdown';
+        if (cdEl.className !== want) cdEl.className = want;
+    }} else if (cdEl.textContent !== '') {{
         cdEl.textContent = '';
     }}
 }}
