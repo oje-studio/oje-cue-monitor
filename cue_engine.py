@@ -226,19 +226,22 @@ class CueEngine:
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
         """
-        Earliest cue strictly in the future, regardless of list order. Ties
-        on timecode break to the first one in list order.
+        Next cue in *list order* — i.e. the show's running order, which is
+        what the operator actually maintains. Random access by timecode is
+        only for resolving the *current* cue; once that's pinned down,
+        "next" walks the list from there.
+
+        Why list order, not time order:
+        if cues are 04:00 (row 1), then 03:00 (row 17, last), the operator
+        considers 03:00 the end of the show. After it plays, "next" should
+        be empty — not 04:00 again from the top.
         """
-        best_idx = -1
-        best_frames = -1
-        for i, cue in enumerate(self.cues):
+        start = self._active_index + 1 if self._active_index >= 0 else 0
+        for i in range(start, len(self.cues)):
+            cue = self.cues[i]
             if cue.is_divider or not cue.has_timecode:
                 continue
-            if cue.frames > tc_frames and (best_frames < 0 or cue.frames < best_frames):
-                best_idx = i
-                best_frames = cue.frames
-        if 0 <= best_idx < len(self.cues):
-            return self.cues[best_idx]
+            return cue
         return None
 
     def get_countdown(self, tc_frames: int) -> Optional[float]:
