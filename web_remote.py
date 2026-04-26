@@ -818,15 +818,29 @@ function initAuth() {{
     const passwordInput = document.getElementById('password-input');
     const operatorSelect = document.getElementById('operator-select');
     const authForm = document.getElementById('auth-form');
+    const authSubmit = document.getElementById('auth-submit');
     document.getElementById('password-field').classList.toggle('hidden', !PASSWORD_REQUIRED);
 
-    // The button is type="submit", so a tap on it OR pressing Enter inside
-    // any field of the form triggers the form's native submit. We hijack
-    // that to call submitAuth, with preventDefault so the page doesn't
-    // reload to /?operator=…&password=…
+    // Three paths to submitAuth, all guarded by the submitBtn.disabled
+    // double-submit lock so they can't fire twice on the same gesture:
+    //   - form submit  → covers Enter inside any text field
+    //   - button click → covers tap on iOS where form-implicit-submit
+    //                    with only a <select> + hidden input is unreliable
+    //   - select keydown Enter → some Safari versions don't bubble
+    //                            keydown on a <select> to the form
     authForm.addEventListener('submit', (event) => {{
         event.preventDefault();
         submitAuth();
+    }});
+    authSubmit.addEventListener('click', (event) => {{
+        event.preventDefault();
+        submitAuth();
+    }});
+    operatorSelect.addEventListener('keydown', (event) => {{
+        if (event.key === 'Enter' || event.keyCode === 13) {{
+            event.preventDefault();
+            submitAuth();
+        }}
     }});
 
     document.getElementById('access-btn').addEventListener('click', () => {{
