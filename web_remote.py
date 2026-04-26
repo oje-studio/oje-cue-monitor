@@ -283,12 +283,14 @@ body {{
     background: #000;
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-    /* 100dvh — dynamic viewport — keeps the layout pegged to whatever
-       slice of screen Safari is actually exposing right now (URL bar
-       up, URL bar collapsed, gesture pull, etc). Fallback to svh/vh. */
+    /* svh = "smallest viewport height" — the slice of screen that's
+       always visible, even when iOS Safari's toolbar is showing. Using
+       it (instead of 100dvh) guarantees the bottom strip never lands
+       under the URL bar. The trade-off: a tiny strip of dark space at
+       the bottom when the user scrolls and Safari hides its chrome.
+       That's preferable to content being clipped. */
     height: 100vh;
     height: 100svh;
-    height: 100dvh;
     overflow: hidden;
     /* Grid layout — three rows, each owns its space, no flex-shifting
        when cue text changes length between updates. */
@@ -311,8 +313,12 @@ body {{
     align-items: center;
     justify-content: center;
     gap: 14px;
-    flex-wrap: wrap;
+    /* nowrap — Access button used to wrap onto a second row on phones,
+       which doubled the status bar height and pushed the bottom strip
+       under iOS Safari's toolbar. */
+    flex-wrap: nowrap;
     min-height: 48px;
+    overflow: hidden;
 }}
 .statusbar .dot {{
     color: #d75a5a;
@@ -566,6 +572,23 @@ body {{
     padding: 4px 10px;
     font-size: 11px;
 }}
+/* Floating Access pill — sits in the top-right corner over the status
+   bar without occupying flex space, so the status bar stays a single
+   tight row on phones. */
+.access-pill {{
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 12px);
+    border: 1px solid #2d2d2d;
+    border-radius: 999px;
+    background: rgba(20, 20, 20, 0.9);
+    color: #b5b5b5;
+    padding: 4px 12px;
+    font-size: 11px;
+    z-index: 50;
+    cursor: pointer;
+}}
+.access-pill:hover {{ background: rgba(35, 35, 35, 0.95); }}
 .connection-lost {{
     position: fixed;
     top: env(safe-area-inset-top, 0px); left: 0; right: 0;
@@ -581,19 +604,30 @@ body {{
    clamp() and grid auto-fit, this just trims spacing on small screens. */
 @media (max-width: 600px) {{
     .statusbar {{
-        padding: 8px 12px;
-        gap: 8px;
+        padding: 8px 10px;
+        gap: 6px;
+        min-height: 40px;
     }}
     .statusbar .sep,
     .statusbar #fps {{
         display: none;       /* keep TC + signal state + clock — drop FPS for space */
     }}
+    .statusbar .tc {{ font-size: 18px; min-width: 0; }}
+    .statusbar .clock {{ font-size: 14px; min-width: 0; }}
+    .statusbar .meta {{ font-size: 11px; }}
+    .access-pill {{
+        top: calc(env(safe-area-inset-top, 0px) + 4px);
+        right: calc(env(safe-area-inset-right, 0px) + 8px);
+        padding: 3px 9px;
+        font-size: 10px;
+    }}
     .main {{
-        padding: 16px 16px;
+        padding: 16px;
+        gap: 8px;
     }}
     .next-strip {{
-        padding: 12px 16px;
-        min-height: 64px;
+        padding: 10px 14px;
+        min-height: 60px;
     }}
     .operators {{
         grid-template-columns: 1fr;     /* one card per row on phone */
@@ -634,8 +668,10 @@ body {{
     <span class="meta" id="signal-db">−∞ dB</span>
     <span class="sep">|</span>
     <span class="clock" id="clock">--:--:--</span>
-    <button id="access-btn" class="mini-btn" type="button" style="margin-left:8px;">Access</button>
 </div>
+<!-- Access button floats over the status bar so it doesn't push the bar
+     into a two-row layout on narrow screens. -->
+<button id="access-btn" class="access-pill" type="button">Access</button>
 
 <!-- Current cue — owns the flexible row. -->
 <div class="main">
