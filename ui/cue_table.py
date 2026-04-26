@@ -27,29 +27,40 @@ C_DUPLICATE  = QColor(140, 100, 20)
 C_DUP_HIGHLIGHT = QColor(160, 120, 30)
 
 # 20 color choices
+# A short, well-spaced palette is easier to scan than 20 near-duplicates.
+# Eight buckets cover the operator's actual semantic vocabulary
+# (alarm / warning / attention / go / info / secondary / special / neutral)
+# without three near-identical reds or three near-identical blues.
+# Names are kept stable so existing .ojeshow files that referenced any of
+# the deleted hues still resolve to the closest remaining bucket below.
 COLOR_PALETTE: List[Tuple[str, QColor]] = [
-    ("",           QColor(0, 0, 0, 0)),
-    ("red",        QColor(175, 48, 48)),
-    ("dark red",   QColor(120, 25, 25)),
-    ("orange",     QColor(195, 105, 38)),
-    ("amber",      QColor(210, 160, 30)),
-    ("yellow",     QColor(175, 155, 38)),
-    ("lime",       QColor(95, 180, 45)),
-    ("green",      QColor(48, 155, 75)),
-    ("dark green", QColor(30, 100, 50)),
-    ("teal",       QColor(38, 140, 130)),
-    ("cyan",       QColor(48, 165, 175)),
-    ("sky",        QColor(70, 145, 210)),
-    ("blue",       QColor(48, 95, 175)),
-    ("dark blue",  QColor(35, 55, 130)),
-    ("indigo",     QColor(75, 55, 160)),
-    ("purple",     QColor(125, 55, 175)),
-    ("magenta",    QColor(165, 50, 140)),
-    ("pink",       QColor(195, 95, 155)),
-    ("rose",       QColor(190, 70, 90)),
-    ("white",      QColor(200, 200, 200)),
-    ("grey",       QColor(110, 110, 110)),
+    ("",       QColor(0, 0, 0, 0)),       # no colour
+    ("red",    QColor(175, 48, 48)),
+    ("orange", QColor(195, 105, 38)),
+    ("amber",  QColor(210, 160, 30)),
+    ("green",  QColor(48, 155, 75)),
+    ("teal",   QColor(38, 140, 130)),
+    ("blue",   QColor(48, 95, 175)),
+    ("purple", QColor(125, 55, 175)),
+    ("grey",   QColor(110, 110, 110)),
 ]
+
+# Backwards-compat aliases — old shows referenced these names; map them
+# onto the closest surviving bucket so loading doesn't drop the colour.
+_COLOR_ALIASES = {
+    "dark red":   "red",
+    "yellow":     "amber",
+    "lime":       "green",
+    "dark green": "green",
+    "cyan":       "teal",
+    "sky":        "blue",
+    "dark blue":  "blue",
+    "indigo":     "purple",
+    "magenta":    "purple",
+    "pink":       "purple",
+    "rose":       "red",
+    "white":      "grey",
+}
 
 NAMED_COLORS = {name: color for name, color in COLOR_PALETTE if name}
 
@@ -63,7 +74,11 @@ COLUMNS = ("#", "Timecode", "Name", "Description", "Color")
 
 
 def _named_bg(name: str) -> Optional[QColor]:
-    return NAMED_COLORS.get(name.lower().strip())
+    key = (name or "").lower().strip()
+    if key in NAMED_COLORS:
+        return NAMED_COLORS[key]
+    # Resolve legacy names from the longer palette to a current colour.
+    return NAMED_COLORS.get(_COLOR_ALIASES.get(key, ""))
 
 
 def _color_icon(color: QColor, size: int = 16) -> QIcon:
@@ -82,22 +97,24 @@ def _color_icon(color: QColor, size: int = 16) -> QIcon:
 
 class ColorDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        color_name = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        color = _named_bg(color_name)
+        # Just the swatch — no name text inside. The colour itself IS
+        # the label; spelling out "red" inside a red rectangle was
+        # redundant and made the column feel busy. The whole row
+        # already tints to this colour in non-edit mode, so the cell
+        # acts purely as a quick "what colour is this cue?" indicator.
+        color = _named_bg(index.data(Qt.ItemDataRole.DisplayRole) or "")
         painter.save()
         if color:
-            rect = QRect(option.rect.x() + 4, option.rect.y() + 4,
-                         option.rect.width() - 8, option.rect.height() - 8)
+            rect = QRect(option.rect.x() + 6, option.rect.y() + 6,
+                         option.rect.width() - 12, option.rect.height() - 12)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(rect, 4, 4)
-            painter.setPen(QColor(255, 255, 255, 200))
-            f = QFont(); f.setPointSize(10)
-            painter.setFont(f)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, color_name)
         else:
-            painter.setPen(QColor(80, 80, 80))
+            painter.setPen(QColor(70, 70, 70))
+            f = QFont(); f.setPointSize(11)
+            painter.setFont(f)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, "—")
         painter.restore()
 
