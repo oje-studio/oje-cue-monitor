@@ -11,6 +11,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 
 from show_file import ShowSettings
 from ui.fonts import mono_font, sans_font
+from ui import theme
 
 APP_NAME  = "ØJE CUE MONITOR"
 COPYRIGHT = "© 2026 ØJE Studio"
@@ -108,40 +109,49 @@ class PerformanceView(QWidget):
         # ── Status bar ───────────────────────────────────────────────────────
         time_bar = QWidget()
         time_bar.setFixedHeight(54)
-        time_bar.setStyleSheet("background: #0a0a0a;")
+        time_bar.setStyleSheet(f"background: {theme.BG_HEADER};")
         tb_lay = QHBoxLayout(time_bar)
         tb_lay.setContentsMargins(24, 0, 24, 0)
         tb_lay.setSpacing(10)
 
+        # One stylesheet string for every middot — keeps the
+        # vocabulary identical with the main window header (C2)
+        # and the web remote (a3 / E1).
+        sep_qss = f"color: {theme.TEXT_DIM}; font-size: 22px;"
+
         self._signal_dot_lbl = QLabel("●")
-        self._signal_dot_lbl.setStyleSheet("color: #d75a5a; font-size: 18px;")
+        self._signal_dot_lbl.setStyleSheet(
+            f"color: {theme.SEMANTIC_DANGER}; font-size: 18px;"
+        )
         tb_lay.addStretch()
         tb_lay.addWidget(self._signal_dot_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._tc_header_lbl = QLabel("--:--:--:--")
         self._tc_header_lbl.setFont(mono_font(24, bold=True))
-        self._tc_header_lbl.setStyleSheet("color: #f0f0f0;")
+        self._tc_header_lbl.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         tb_lay.addWidget(self._tc_header_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._sep_1 = QLabel("·")
-        self._sep_1.setStyleSheet("color: #5a5a5a; font-size: 22px;")
+        self._sep_1.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_1, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._fps_lbl = QLabel("FPS 25.00")
         self._fps_lbl.setFont(mono_font(15, bold=True))
-        self._fps_lbl.setStyleSheet("color: #858585;")
+        self._fps_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         tb_lay.addWidget(self._fps_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._sep_2 = QLabel("·")
-        self._sep_2.setStyleSheet("color: #5a5a5a; font-size: 22px;")
+        self._sep_2.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_2, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._signal_state_lbl = QLabel("NO SIGNAL")
         self._signal_state_lbl.setFont(mono_font(15, bold=True))
+        # Initial colour set by update_signal_state — leave unset here
+        # so a fresh PerformanceView doesn't flash an unrelated colour.
         tb_lay.addWidget(self._signal_state_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._sep_level = QLabel("·")
-        self._sep_level.setStyleSheet("color: #5a5a5a; font-size: 22px;")
+        self._sep_level.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_level, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Visual VU meter — same style as the meter in the main edit window.
@@ -150,16 +160,16 @@ class PerformanceView(QWidget):
 
         self._signal_level_lbl = QLabel("−∞ dB")
         self._signal_level_lbl.setFont(mono_font(13, bold=True))
-        self._signal_level_lbl.setStyleSheet("color: #7a7a7a;")
+        self._signal_level_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         tb_lay.addWidget(self._signal_level_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._sep_3 = QLabel("·")
-        self._sep_3.setStyleSheet("color: #5a5a5a; font-size: 22px;")
+        self._sep_3.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_3, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._clock_lbl = QLabel("")
         self._clock_lbl.setFont(mono_font(24, bold=True))
-        self._clock_lbl.setStyleSheet("color: #dcdcdc;")
+        self._clock_lbl.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         tb_lay.addWidget(self._clock_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         tb_lay.addStretch()
 
@@ -459,26 +469,29 @@ class PerformanceView(QWidget):
         self._signal_level_lbl.setText(db_text)
         self._vu.set_db(db)
 
+        # Four states, each routed to a single semantic token so the
+        # Performance Mode indicator matches the same colour anywhere
+        # else it appears (signal dot, web banner, START button).
         if warning == "Clipping!":
-            state_text = "CLIPPING"
-            state_color = "#dc4040"
-            level_color = "#dc4040"
-            dot_color = "#dc4040"
+            state_text  = "CLIPPING"
+            state_color = theme.SEMANTIC_DANGER
+            level_color = theme.SEMANTIC_DANGER
+            dot_color   = theme.SEMANTIC_DANGER
         elif warning == "Weak signal":
-            state_text = "WEAK"
-            state_color = "#d6a638"
-            level_color = "#d6a638"
-            dot_color = "#d6a638"
+            state_text  = "WEAK"
+            state_color = theme.SEMANTIC_WARNING
+            level_color = theme.SEMANTIC_WARNING
+            dot_color   = theme.SEMANTIC_WARNING
         elif signal_ok:
-            state_text = "LIVE"
-            state_color = "#4bc373"
-            level_color = "#dcdcdc"
-            dot_color = "#4bc373"
+            state_text  = "LIVE"
+            state_color = theme.SEMANTIC_SUCCESS
+            level_color = theme.TEXT_PRIMARY
+            dot_color   = theme.SEMANTIC_SUCCESS
         else:
-            state_text = "NO SIGNAL"
-            state_color = "#d75a5a"
-            level_color = "#7a7a7a"
-            dot_color = "#d75a5a"
+            state_text  = "NO SIGNAL"
+            state_color = theme.SEMANTIC_DANGER
+            level_color = theme.TEXT_MUTED
+            dot_color   = theme.SEMANTIC_DANGER
 
         self._signal_state_lbl.setText(state_text)
         self._signal_state_lbl.setStyleSheet(f"color: {state_color};")
