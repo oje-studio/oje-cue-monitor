@@ -905,11 +905,24 @@ function render(state) {{
 
     // ── Current cue ──
     const cur = state.current_cue;
-    const curSig = cur ? (cur.id || '') + '|' + (cur.name || '') + '|' + (cur.description || '') : '';
+    // Sig folds in state.running too so we re-render when LTC starts /
+    // stops with no matching cue (the "No cue at this timecode" copy
+    // toggles on/off based on running).
+    const curSig = cur
+        ? (cur.id || '') + '|' + (cur.name || '') + '|' + (cur.description || '')
+        : (state.running ? 'RUN_NO_CUE' : 'OFF');
     if (curSig !== _curCueSig) {{
         _curCueSig = curSig;
-        setText('cur-name', cur ? (cur.name || '—') : '—');
-        setText('cur-desc', cur ? (cur.description || '') : '');
+        if (cur) {{
+            setText('cur-name', cur.name || '—');
+            setText('cur-desc', cur.description || '');
+        }} else if (state.running) {{
+            setText('cur-name', '—');
+            setText('cur-desc', 'No cue at this timecode');
+        }} else {{
+            setText('cur-name', '—');
+            setText('cur-desc', '');
+        }}
     }}
     const curOpsSig = cur ? JSON.stringify(cur.operator_comments || {{}}) : '';
     if (curOpsSig !== _curOpsSig) {{
