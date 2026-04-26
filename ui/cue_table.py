@@ -102,23 +102,31 @@ def _color_icon(color: QColor, size: int = 16) -> QIcon:
 # ── Color delegate ────────────────────────────────────────────────────────────
 
 class ColorDelegate(QStyledItemDelegate):
+    """
+    Cue-colour cell paint.  Renders a tight horizontal pill instead
+    of an almost-cell-sized rectangle so the column reads as a
+    decorative tag, not a saturated stripe — consistent with the
+    new 7 % row tint, which is now the primary "what colour is
+    this cue?" signal.  Empty cues show a faint em-dash.
+    """
+
+    PILL_HEIGHT = 12
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        # Just the swatch — no name text inside. The colour itself IS
-        # the label; spelling out "red" inside a red rectangle was
-        # redundant and made the column feel busy. The whole row
-        # already tints to this colour in non-edit mode, so the cell
-        # acts purely as a quick "what colour is this cue?" indicator.
         color = _named_bg(index.data(Qt.ItemDataRole.DisplayRole) or "")
         painter.save()
         if color:
-            rect = QRect(option.rect.x() + 6, option.rect.y() + 6,
-                         option.rect.width() - 12, option.rect.height() - 12)
+            cell = option.rect
+            pill_w = max(cell.width() - 16, 0)
+            pill_h = self.PILL_HEIGHT
+            x = cell.x() + 8
+            y = cell.center().y() - pill_h // 2
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(rect, 4, 4)
+            painter.drawRoundedRect(x, y, pill_w, pill_h, pill_h / 2, pill_h / 2)
         else:
-            painter.setPen(QColor(70, 70, 70))
+            painter.setPen(QColor(theme.TEXT_DISABLED))
             f = QFont(); f.setPointSize(11)
             painter.setFont(f)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, "—")
@@ -127,8 +135,13 @@ class ColorDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         combo = QComboBox(parent)
         combo.setStyleSheet(
-            "QComboBox { background: #2a2a2a; color: #dcdcdc; border: 1px solid #555; }"
-            "QComboBox QAbstractItemView { background: #2a2a2a; color: #dcdcdc; }"
+            f"QComboBox {{ background: {theme.BG_INPUT}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_SM}px; }}"
+            f"QComboBox QAbstractItemView {{ background: {theme.BG_INPUT}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"selection-background-color: {theme.BG_RAISED}; }}"
         )
         for name, color in COLOR_PALETTE:
             if name:
@@ -371,7 +384,10 @@ class CueTable(QTableWidget):
         #   Description STRETCH — takes whatever's left; this is the
         #              column that gets squeezed when the operator panel
         #              opens on the right, so Description gets priority
-        #   Color      fixed 90 px — swatch + label
+        #   Color      fixed 64 px — narrow pill swatch (the row tint
+        #              already carries the colour signal; this column
+        #              just gives the operator a quick "what tag?"
+        #              indicator and the picker affordance)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         hh.resizeSection(1, 120)
@@ -379,7 +395,7 @@ class CueTable(QTableWidget):
         hh.resizeSection(2, 220)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        hh.resizeSection(4, 90)
+        hh.resizeSection(4, 64)
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
