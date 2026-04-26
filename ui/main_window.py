@@ -10,7 +10,7 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer, QSettings
 from PyQt6.QtGui import (
-    QColor, QFont, QPalette, QKeySequence, QShortcut,
+    QColor, QFont, QPalette, QKeySequence, QShortcut, QAction,
     QPainter, QBrush, QPixmap, QTextDocument, QPageSize,
 )
 from PyQt6.QtPrintSupport import QPrinter
@@ -391,49 +391,15 @@ class MainWindow(QMainWindow):
         fl.setContentsMargins(12, 0, 12, 0)
         fl.setSpacing(8)
 
-        self._btn_new = QPushButton("New")
-        self._btn_new.setFixedHeight(30)
-        self._btn_new.setToolTip("Create a new empty show")
-        self._btn_new.clicked.connect(self._new_show)
-        fl.addWidget(self._btn_new)
-
-        self._btn_open = QPushButton("Open")
-        self._btn_open.setFixedHeight(30)
-        self._btn_open.setToolTip("Open show file (.ojeshow) or import CSV")
-        self._btn_open.clicked.connect(self._open_show)
-        fl.addWidget(self._btn_open)
-
-        self._btn_save = QPushButton("Save")
-        self._btn_save.setFixedHeight(30)
-        _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
-        self._btn_save.setToolTip(f"Save show file (.ojeshow)  [{_mod}+S]")
-        self._btn_save.clicked.connect(self._save_show)
-        fl.addWidget(self._btn_save)
-
-        self._btn_save_as = QPushButton("Save As...")
-        self._btn_save_as.setFixedHeight(30)
-        self._btn_save_as.setToolTip("Save to a new file")
-        self._btn_save_as.clicked.connect(self._save_show_as)
-        fl.addWidget(self._btn_save_as)
-
-        self._btn_export_pdf = QPushButton("Export PDF")
-        self._btn_export_pdf.setFixedHeight(30)
-        self._btn_export_pdf.setToolTip("Export printable cue sheet as PDF")
-        self._btn_export_pdf.clicked.connect(self._export_pdf)
-        fl.addWidget(self._btn_export_pdf)
-
-        fl.addWidget(_vline())
-
+        # File / Settings / Help live in the native menu bar (built in
+        # _build_menu_bar). The footer keeps only the two actions the
+        # operator toggles during a show — everything else is one-shot
+        # and belongs in the menu.
         self._btn_edit = QPushButton("Edit Cues")
         self._btn_edit.setFixedHeight(30)
         self._btn_edit.setCheckable(True)
         self._btn_edit.clicked.connect(self._toggle_edit_mode)
         fl.addWidget(self._btn_edit)
-
-        self._btn_settings = QPushButton("Settings")
-        self._btn_settings.setFixedHeight(30)
-        self._btn_settings.clicked.connect(self._open_settings)
-        fl.addWidget(self._btn_settings)
 
         self._btn_remote = QPushButton("Remote")
         self._btn_remote.setFixedHeight(30)
@@ -443,12 +409,6 @@ class MainWindow(QMainWindow):
         fl.addWidget(self._btn_remote)
 
         fl.addStretch()
-
-        self._btn_help = QPushButton("?")
-        self._btn_help.setFixedSize(28, 28)
-        self._btn_help.setToolTip("Help & Keyboard Shortcuts  [F1]")
-        self._btn_help.clicked.connect(self._show_help)
-        fl.addWidget(self._btn_help)
 
         cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}  ·  {EMAIL}")
         cr_lbl.setStyleSheet(f"color: {QColor(75,75,75).name()}; font-size: 10px;")
@@ -475,13 +435,15 @@ class MainWindow(QMainWindow):
     # ── shortcuts ─────────────────────────────────────────────────────────────
 
     def _setup_shortcuts(self):
+        # Window-wide shortcuts that aren't menu items (Space = mark
+        # cue, P = toggle Performance, Escape = exit Performance).
+        # Menu actions own their own accelerators (Cmd+N/O/S etc.) —
+        # see _build_menu_bar — so we don't duplicate them here.
         QShortcut(QKeySequence("Space"),  self).activated.connect(self._mark_cue)
         QShortcut(QKeySequence("P"),      self).activated.connect(self._toggle_perf_mode)
         QShortcut(QKeySequence("Escape"), self).activated.connect(self._exit_perf_mode)
-        QShortcut(QKeySequence("F1"),     self).activated.connect(self._show_help)
-        QShortcut(QKeySequence.StandardKey.Save, self).activated.connect(self._save_show)
-        QShortcut(QKeySequence.StandardKey.New,  self).activated.connect(self._new_show)
-        QShortcut(QKeySequence.StandardKey.Open, self).activated.connect(self._open_show)
+
+        self._build_menu_bar()
 
     # ── state ─────────────────────────────────────────────────────────────────
 
@@ -588,6 +550,66 @@ class MainWindow(QMainWindow):
             return self._save_show()
         return True
 
+    # ── Menu bar ──────────────────────────────────────────────────────────────
+
+    def _build_menu_bar(self):
+        """
+        Native menu bar — File / Settings / Help. On macOS Qt promotes
+        this to the top-of-screen system menu automatically. Action
+        roles tag Settings as Preferences and About as AboutRole so
+        macOS files them under the app menu in the conventional
+        place.
+        """
+        bar = self.menuBar()
+
+        # ── File ─────────────────────────────
+        m_file = bar.addMenu("&File")
+
+        a_new = QAction("&New Show", self)
+        a_new.setShortcut(QKeySequence.StandardKey.New)
+        a_new.triggered.connect(self._new_show)
+        m_file.addAction(a_new)
+
+        a_open = QAction("&Open Show…", self)
+        a_open.setShortcut(QKeySequence.StandardKey.Open)
+        a_open.triggered.connect(self._open_show)
+        m_file.addAction(a_open)
+
+        m_file.addSeparator()
+
+        a_save = QAction("&Save", self)
+        a_save.setShortcut(QKeySequence.StandardKey.Save)
+        a_save.triggered.connect(self._save_show)
+        m_file.addAction(a_save)
+
+        a_save_as = QAction("Save &As…", self)
+        a_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
+        a_save_as.triggered.connect(self._save_show_as)
+        m_file.addAction(a_save_as)
+
+        m_file.addSeparator()
+
+        a_export_pdf = QAction("Export &PDF…", self)
+        a_export_pdf.setShortcut(QKeySequence("Ctrl+E"))
+        a_export_pdf.triggered.connect(self._export_pdf)
+        m_file.addAction(a_export_pdf)
+
+        # ── Settings ─────────────────────────
+        # On macOS this is promoted into the app menu under "Preferences".
+        a_settings = QAction("Settings…", self)
+        a_settings.setMenuRole(QAction.MenuRole.PreferencesRole)
+        a_settings.setShortcut(QKeySequence("Ctrl+,"))
+        a_settings.triggered.connect(self._open_settings)
+        m_settings = bar.addMenu("&Settings")
+        m_settings.addAction(a_settings)
+
+        # ── Help ─────────────────────────────
+        m_help = bar.addMenu("&Help")
+        a_help = QAction("Keyboard Shortcuts && Help", self)
+        a_help.setShortcut(QKeySequence("F1"))
+        a_help.triggered.connect(self._show_help)
+        m_help.addAction(a_help)
+
     def _new_show(self):
         if not self._confirm_discard_or_save(
             "New Show",
@@ -680,16 +702,11 @@ class MainWindow(QMainWindow):
             return False
 
     def _flash_save_ok(self):
-        self._btn_save.setText("Saved!")
-        self._btn_save.setStyleSheet(
-            f"QPushButton {{ background: {QColor(48,125,75).name()}; "
-            f"color: white; border-radius: 4px; }}"
-        )
-        QTimer.singleShot(1500, self._reset_save_btn)
-
-    def _reset_save_btn(self):
-        self._btn_save.setText("Save")
-        self._btn_save.setStyleSheet("")
+        # Save button moved to the File menu — surface the confirmation
+        # via the window title for ~1.5 s instead of a toast.
+        original = self.windowTitle()
+        self.setWindowTitle(f"{original}    ✓ Saved")
+        QTimer.singleShot(1500, lambda t=original: self.setWindowTitle(t))
 
     def _save_show_as(self) -> bool:
         if self._show is None:
