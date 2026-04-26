@@ -779,6 +779,13 @@ class MainWindow(QMainWindow):
             return base + ".pdf"
         return os.path.join(os.path.expanduser("~"), "OJE Cue Sheet.pdf")
 
+    def _resolve_logo_path(self) -> Optional[str]:
+        """Logo discovery for the PDF export.  Returns the first match
+        from: explicit settings.logo_path → assets/ → public/.  None
+        when nothing is found (the spec wants the column to render
+        empty in that case, not a placeholder)."""
+        return _find_logo_path(self._show_settings)
+
     def _current_show_title(self) -> str:
         if self._show_settings.show_title.strip():
             return self._show_settings.show_title.strip()
@@ -2089,6 +2096,43 @@ def _help_btn_style() -> str:
         f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; "
         f"border-color: {theme.BORDER_STRONG}; }}"
     )
+
+
+def _find_logo_path(settings) -> Optional[str]:
+    """
+    Pick the show's logo image, in order of preference:
+      1. settings.logo_path if set and the file exists.
+      2. First match in <repo>/assets for ``logo*`` / ``show-logo*``
+         with a common image extension.
+      3. Same in <repo>/public.
+
+    Returns None when nothing is found — the PDF export's spec says
+    leave the column empty in that case, no placeholder.
+    """
+    explicit = (getattr(settings, "logo_path", "") or "").strip()
+    if explicit and os.path.exists(explicit):
+        return explicit
+
+    # Repo root: this file is .../<repo>/ui/main_window.py
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    extensions = (".png", ".jpg", ".jpeg", ".svg")
+    name_prefixes = ("logo", "show-logo")
+    for sub in ("assets", "public"):
+        d = os.path.join(repo_root, sub)
+        if not os.path.isdir(d):
+            continue
+        try:
+            entries = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for entry in entries:
+            stem, ext = os.path.splitext(entry)
+            if ext.lower() not in extensions:
+                continue
+            stem_l = stem.lower()
+            if any(stem_l.startswith(p) for p in name_prefixes):
+                return os.path.join(d, entry)
+    return None
 
 
 def _pdf_color_hex(name: str) -> str:
