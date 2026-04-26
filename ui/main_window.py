@@ -257,45 +257,53 @@ class MainWindow(QMainWindow):
         # ── Header ────────────────────────────────────────────────────────────
         header = QWidget()
         header.setFixedHeight(52)
-        header.setStyleSheet(f"background: {NEAR_BLACK.name()};")
+        header.setStyleSheet(f"background: {theme.BG_HEADER};")
         hl = QHBoxLayout(header)
         hl.setContentsMargins(14, 0, 14, 0)
         hl.setSpacing(10)
 
         hl.addWidget(BrandMark(parent=header), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        hl.addWidget(_vline())
+        hl.addWidget(_dot_sep())
 
         self._signal_dot = QLabel("●")
-        self._signal_dot.setStyleSheet(f"color: {ACCENT_RED.name()}; font-size: 16px;")
+        self._signal_dot.setStyleSheet(f"color: {theme.SEMANTIC_DANGER}; font-size: 16px;")
         hl.addWidget(self._signal_dot)
 
         self._tc_label = QLabel("--:--:--:--")
         self._tc_label.setFont(mono_font(22, bold=True))
-        self._tc_label.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 2px;")
+        self._tc_label.setStyleSheet(f"color: {theme.TEXT_BRIGHT}; letter-spacing: 2px;")
         hl.addWidget(self._tc_label)
 
-        self._fps_label = QLabel("FPS: —")
-        self._fps_label.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 12px;")
+        hl.addWidget(_dot_sep())
+
+        self._fps_label = QLabel("FPS —")
+        self._fps_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 12px;")
         hl.addWidget(self._fps_label)
+
+        hl.addWidget(_dot_sep())
 
         self._vu = VUMeter()
         hl.addWidget(self._vu)
 
         self._signal_warn = QLabel("")
-        self._signal_warn.setStyleSheet(f"color: {ACCENT_ORANGE.name()}; font-size: 11px;")
+        self._signal_warn.setStyleSheet(f"color: {theme.SEMANTIC_WARNING}; font-size: 11px;")
         hl.addWidget(self._signal_warn)
 
         hl.addStretch()
 
         self._live_label = QLabel("● LIVE")
         self._live_label.setStyleSheet(
-            f"color: {ACCENT_GREEN.name()}; font-size: 12px; font-weight: bold;"
+            f"color: {theme.SEMANTIC_SUCCESS}; font-size: 12px; font-weight: bold;"
         )
         self._live_label.setVisible(False)
         hl.addWidget(self._live_label)
 
-        # Logo in header
+        # Show-specific logo (pulled from .ojeshow settings.logo_path).
+        # Distinct from the BrandMark on the left — that's the studio
+        # mark, this is whatever logo the operator wants for the
+        # current production.  Hidden until set_show_settings wires
+        # in a real pixmap.
         self._header_logo = QLabel()
         self._header_logo.setVisible(False)
         hl.addWidget(self._header_logo)
@@ -306,15 +314,15 @@ class MainWindow(QMainWindow):
         # Small clock-face icon prefix makes it unmistakable that this
         # is wall time, not another timecode.
         from ui.icons import make_icon
-        hl.addWidget(_vline())
+        hl.addWidget(_dot_sep())
         self._clock_icon_lbl = QLabel()
         self._clock_icon_lbl.setPixmap(
-            make_icon("clock", "#878787").pixmap(20, 20)
+            make_icon("clock", theme.TEXT_DIM).pixmap(20, 20)
         )
         hl.addWidget(self._clock_icon_lbl)
         self._clock_label = QLabel("")
         self._clock_label.setFont(mono_font(24, bold=True))
-        self._clock_label.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
+        self._clock_label.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         hl.addWidget(self._clock_label)
         # Header now ends here — Performance and Start moved to the
         # footer alongside Edit Cues / Remote so the operator sees one
@@ -1803,6 +1811,18 @@ def _hline() -> QFrame:
     f.setFrameShape(QFrame.Shape.HLine)
     f.setStyleSheet(f"color: {DARK_BORDER.name()};")
     return f
+
+
+def _dot_sep() -> QLabel:
+    """
+    Middot separator between header items — same shape as the
+    Performance Mode and Web Remote status bars (A3).  A typographic
+    rest between groups, not a vertical bar that visually competes
+    with the timecode digits.
+    """
+    s = QLabel("·")
+    s.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 22px;")
+    return s
 
 
 def _logo_pixmap(color_hex: str, size: int) -> QPixmap:
