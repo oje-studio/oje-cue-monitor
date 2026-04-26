@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field as dc_field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 
 from show_file import ShowCue
 
@@ -21,6 +22,30 @@ class Cue:
     @property
     def has_timecode(self) -> bool:
         return self.timecode.strip() != "" and self.frames >= 0
+
+
+def find_duplicate_rows(cues: List["Cue"]) -> Set[int]:
+    """
+    Return the set of row indices whose timecode is shared with at
+    least one other (non-divider) cue.  A single source of truth so
+    the cue table, the PDF export and any other surface that flags
+    duplicates can never disagree about the answer.
+
+    Equality is whitespace-stripped string equality on `timecode`;
+    no further normalisation since the engine produces canonical
+    HH:MM:SS:FF strings already.  Dividers and empty-TC rows are
+    excluded from the count.
+    """
+    tc_counts = Counter(
+        c.timecode.strip() for c in cues
+        if not c.is_divider and c.timecode.strip()
+    )
+    return {
+        row for row, c in enumerate(cues)
+        if not c.is_divider
+        and c.timecode.strip()
+        and tc_counts[c.timecode.strip()] > 1
+    }
 
 
 class CueParseError(Exception):

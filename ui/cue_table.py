@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QRect
 from PyQt6.QtGui import QColor, QFont, QBrush, QPainter, QPixmap, QIcon
 
-from cue_engine import Cue
+from cue_engine import Cue, find_duplicate_rows
 from ui.fonts import mono_font
 from ui import theme
 from typing import List, Optional, Tuple, Dict
@@ -474,16 +474,10 @@ class CueTable(QTableWidget):
         self._section_counts = counts
 
     def _compute_duplicates(self, cues: List[Cue]):
-        from collections import Counter
-        tc_counts = Counter(
-            c.timecode.strip() for c in cues
-            if not c.is_divider and c.timecode.strip()
-        )
-        self._duplicate_rows = set()
-        for row, cue in enumerate(cues):
-            if not cue.is_divider and cue.timecode.strip():
-                if tc_counts[cue.timecode.strip()] > 1:
-                    self._duplicate_rows.add(row)
+        # Single source of truth lives in cue_engine — the PDF export
+        # uses the same helper so the table and the cue sheet can
+        # never flag different rows as duplicates.
+        self._duplicate_rows = find_duplicate_rows(cues)
 
     def _write_row(self, row: int, cue: Cue):
         tc_display = cue.timecode if not cue.is_divider else ""
