@@ -11,17 +11,22 @@ from PyQt6.QtGui import QColor, QFont, QBrush, QPainter, QPixmap, QIcon
 
 from cue_engine import Cue
 from ui.fonts import mono_font
+from ui import theme
 from typing import List, Optional, Tuple, Dict
 
 C_CURRENT    = QColor(55, 130, 55)
 C_PAST_BG    = QColor(50, 50, 50)
 C_FUTURE_BG  = QColor(38, 38, 38)
-C_DIVIDER_BG = QColor(35, 30, 20)        # warm dark amber, paired with the
-                                          # tan text — same family
+# Section dividers were previously a warm amber (BG #231E14, text
+# #C8B97A) — visually distinct but clashed with cue tags that landed
+# in the same warm-tone family.  Move to neutral grey from the
+# design system so dividers read as "structural metadata" rather
+# than "another colour signal".
+C_SECTION_BG    = QColor(theme.SECTION_BG)
+C_SECTION_TEXT  = QColor(theme.SECTION_TEXT)
+C_SECTION_COUNT = QColor(theme.SECTION_COUNT_TEXT)
 C_TEXT_DIM   = QColor(165, 165, 165)
 C_TEXT_NORM  = QColor(220, 220, 220)
-C_TEXT_DIVIDER = QColor(200, 185, 122)   # warm tan — clearly distinct from
-                                          # operator purple #7a7acd
 C_TC_ERROR   = QColor(110, 35, 35)
 C_DUPLICATE  = QColor(140, 100, 20)
 C_DUP_HIGHLIGHT = QColor(160, 120, 30)
@@ -271,6 +276,7 @@ class CueTable(QTableWidget):
         self._cues: List[Cue] = []
         self._duplicate_rows: set = set()
         self._highlighted_siblings: List[int] = []
+        self._section_counts: Dict[int, int] = {}
 
         self.setHorizontalHeaderLabels(COLUMNS)
         hh = self.horizontalHeader()
@@ -330,6 +336,7 @@ class CueTable(QTableWidget):
             if 0 <= row < len(cues) and cues[row].is_divider
         }
         self._compute_duplicates(cues)
+        self._compute_section_counts(cues)
         self._highlighted_siblings = []
         self._block_signal = True
         self.setRowCount(len(cues))
@@ -340,6 +347,29 @@ class CueTable(QTableWidget):
         self._apply_collapse()
         if self._edit_mode:
             self._update_duplicate_highlight(self.currentRow())
+
+    def _compute_section_counts(self, cues: List[Cue]):
+        """
+        For each divider row, count how many real cues fall under it
+        (everything from the row after the divider up to the next
+        divider, or end of list).  Used by _write_row to append
+        " · N" to the divider's display name so the operator sees
+        the section weight at a glance.
+        """
+        counts: Dict[int, int] = {}
+        current_divider = None
+        running = 0
+        for row, cue in enumerate(cues):
+            if cue.is_divider:
+                if current_divider is not None:
+                    counts[current_divider] = running
+                current_divider = row
+                running = 0
+            else:
+                running += 1
+        if current_divider is not None:
+            counts[current_divider] = running
+        self._section_counts = counts
 
     def _compute_duplicates(self, cues: List[Cue]):
         from collections import Counter
@@ -357,7 +387,9 @@ class CueTable(QTableWidget):
         tc_display = cue.timecode if not cue.is_divider else ""
         name_display = cue.name
         if cue.is_divider:
-            name_display = f"  {cue.name}"
+            count = self._section_counts.get(row, 0)
+            count_part = f"  ·  {count} cue{'' if count == 1 else 's'}" if count else ""
+            name_display = f"  {cue.name}{count_part}"
 
         is_dup = row in self._duplicate_rows
 
@@ -489,8 +521,13 @@ class CueTable(QTableWidget):
                     item = self.item(row, col)
                     if not item:
                         continue
-                    item.setBackground(QBrush(C_DIVIDER_BG))
-                    item.setForeground(QBrush(C_TEXT_DIVIDER))
+                    item.setBackground(QBrush(C_SECTION_BG))
+                    # Section name is brighter than the trailing
+                    # "· N cues" text — Qt items are single-foreground,
+                    # so we settle on the brighter section colour for
+                    # the whole cell and rely on the count's quieter
+                    # phrasing to step back visually.
+                    item.setForeground(QBrush(C_SECTION_TEXT))
                     _bold(item, True)
                 continue
 
