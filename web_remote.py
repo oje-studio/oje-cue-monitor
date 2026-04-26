@@ -784,15 +784,19 @@ async function submitAuth() {{
     const errorEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('auth-submit');
     const overlay = document.getElementById('auth-overlay');
+    // Visible breadcrumb — if you see "click captured" appear in the error
+    // line and then disappear, the handler IS firing. If you never see it,
+    // the click never reached this function.
+    errorEl.style.color = '#7ad07a';
+    errorEl.textContent = 'click captured…';
+    setTimeout(() => {{ errorEl.textContent = ''; errorEl.style.color = ''; }}, 600);
+
     // Guard against the form firing submit twice (e.g. Enter + click).
     if (submitBtn.disabled) return;
-    errorEl.textContent = '';
 
     // No-password fast path: there's nothing to authenticate against, so
     // skip the /auth roundtrip entirely. Apply the operator filter
-    // client-side and hide the overlay. No fetch, no reload, no scope
-    // for "the button doesn't do anything" — the user gets instant
-    // feedback the moment they tap.
+    // client-side and hide the overlay.
     if (!PASSWORD_REQUIRED) {{
         currentOperator = operator || null;
         overlay.classList.add('hidden');
