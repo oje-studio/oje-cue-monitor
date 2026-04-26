@@ -481,8 +481,10 @@ class PerformanceView(QWidget):
                 text = f"{tc}   {cue.name or '—'}"
             item = QListWidgetItem(text)
             if getattr(cue, "is_divider", False):
-                item.setForeground(QColor("#c7d0f5"))
-                item.setBackground(QColor("#182038"))
+                # Tan / amber to distinguish section dividers from
+                # operator labels (which are purple #7a7acd elsewhere).
+                item.setForeground(QColor("#dcc88a"))
+                item.setBackground(QColor("#231e14"))
                 f = item.font()
                 f.setBold(True)
                 item.setFont(f)

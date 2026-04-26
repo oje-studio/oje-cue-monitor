@@ -16,10 +16,12 @@ from typing import List, Optional, Tuple, Dict
 C_CURRENT    = QColor(55, 130, 55)
 C_PAST_BG    = QColor(50, 50, 50)
 C_FUTURE_BG  = QColor(38, 38, 38)
-C_DIVIDER_BG = QColor(20, 20, 38)
+C_DIVIDER_BG = QColor(35, 30, 20)        # warm dark amber, paired with the
+                                          # tan text — same family
 C_TEXT_DIM   = QColor(165, 165, 165)
 C_TEXT_NORM  = QColor(220, 220, 220)
-C_TEXT_DIVIDER = QColor(150, 150, 200)
+C_TEXT_DIVIDER = QColor(200, 185, 122)   # warm tan — clearly distinct from
+                                          # operator purple #7a7acd
 C_TC_ERROR   = QColor(110, 35, 35)
 C_DUPLICATE  = QColor(140, 100, 20)
 C_DUP_HIGHLIGHT = QColor(160, 120, 30)
