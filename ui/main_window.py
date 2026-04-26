@@ -597,11 +597,14 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_export_pdf)
 
         # ── Settings ─────────────────────────
-        # NOTE: don't set PreferencesRole — macOS would move the item into
-        # the app menu and leave the Settings menu empty (looks like a
-        # bug). Keep it in the Settings menu where the operator can find
-        # it from the menubar directly.
+        # Qt's TextHeuristicRole auto-detects the words "Settings",
+        # "Preferences", "Options", "Configure" in QAction text and
+        # silently moves the action to the macOS application menu.
+        # That's where last time the Settings submenu showed up empty —
+        # the action got teleported. Force NoRole so the action stays
+        # exactly where we put it.
         a_settings = QAction("Settings…", self)
+        a_settings.setMenuRole(QAction.MenuRole.NoRole)
         a_settings.setShortcut(QKeySequence("Ctrl+,"))
         a_settings.triggered.connect(self._open_settings)
         m_settings = bar.addMenu("&Settings")
