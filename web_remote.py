@@ -757,23 +757,47 @@ let ws;
 let reconnectTimer;
 let currentOperator = OPERATOR_FILTER;
 
+let pollTimer;
+
+function fetchState() {{
+    return fetch('/api/state', {{ credentials: 'include', cache: 'no-store' }})
+        .then(r => r.ok ? r.json() : null)
+        .then(s => {{ if (s) render(s); return s; }})
+        .catch(() => null);
+}}
+
+function startPolling() {{
+    if (pollTimer) return;
+    pollTimer = setInterval(fetchState, 1000);
+}}
+
+function stopPolling() {{
+    if (pollTimer) {{ clearInterval(pollTimer); pollTimer = null; }}
+}}
+
 function connect() {{
+    // Pull state immediately via HTTP so the cards populate even if the
+    // WebSocket handshake is slow (or the very first WS frame slips
+    // through, which we occasionally see on iOS Safari).
+    fetchState();
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws');
 
+    // Fallback poller: if the WS isn't open within 3 s, start polling
+    // /api/state every second so the UI keeps updating regardless.
+    const wsOpenWatchdog = setTimeout(() => {{
+        if (!ws || ws.readyState !== WebSocket.OPEN) startPolling();
+    }}, 3000);
+
     ws.onopen = () => {{
+        clearTimeout(wsOpenWatchdog);
+        stopPolling();
         document.getElementById('conn-banner').classList.add('hidden');
-        // Belt-and-suspenders for iOS Safari: the server sends the
-        // current state immediately after the upgrade, but on iPhones
-        // we sometimes saw an empty page for a few seconds after a
-        // fresh load — looks like the very first WS frame is missed
-        // while Safari is still wiring things up. Fetch /api/state
-        // explicitly so the cue cards populate even if the initial
-        // push slipped through.
-        fetch('/api/state', {{ credentials: 'same-origin' }})
-            .then(r => r.ok ? r.json() : null)
-            .then(s => {{ if (s) render(s); }})
-            .catch(() => {{}});
+        // One more belt-and-suspenders fetch on open — covers the case
+        // where the server-pushed initial frame raced past Safari's
+        // onmessage assignment.
+        fetchState();
     }};
 
     ws.onmessage = (event) => {{
@@ -781,7 +805,9 @@ function connect() {{
     }};
 
     ws.onclose = () => {{
+        clearTimeout(wsOpenWatchdog);
         document.getElementById('conn-banner').classList.remove('hidden');
+        startPolling();   // keep state flowing while we wait to reconnect
         reconnectTimer = setTimeout(connect, 2000);
     }};
 
