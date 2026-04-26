@@ -411,13 +411,8 @@ class PerformanceView(QWidget):
             self._curr_desc.setText(current_cue.description)
             self._update_operator_cards(current_cue)
         else:
-            # No cue matches the current playhead. If LTC is actually
-            # streaming, tell the operator that explicitly so a blank
-            # cue area doesn't read as "the app is broken".
             self._curr_name.setText("—")
-            self._curr_desc.setText(
-                "No cue at this timecode" if self._signal_ok else ""
-            )
+            self._curr_desc.setText("")
             self._clear_operator_cards()
 
         if next_cue:
