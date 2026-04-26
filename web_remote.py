@@ -1031,13 +1031,14 @@ function initAuth() {{
     }}
 
     // Authenticated path:
-    //  - If the URL pinned an operator (?op=Name), skip the picker —
-    //    the user bookmarked the page for that operator on purpose.
-    //  - Otherwise, show the operator picker on every fresh page load
-    //    (incl. reload) so the user explicitly chooses each time. This
-    //    makes "who am I right now?" an active decision, not a silent
-    //    cookie-restore.
-    if (!OPERATOR_FILTER) {{
+    //   * Password mode: /auth has already happened — don't ask again on
+    //     reload, even if the operator field was left as "All Operators".
+    //     Re-showing the picker here would create a loop, because
+    //     submitAuth in password mode requires a password the user
+    //     no longer has on screen.
+    //   * No-password mode: ask for operator on every reload. submitAuth
+    //     takes the no-password fast path (no /auth, no password needed).
+    if (!OPERATOR_FILTER && !PASSWORD_REQUIRED) {{
         overlay.classList.remove('hidden');
         operatorSelect.focus();
         return false;     // wait for ENTER REMOTE → submitAuth → connect()
