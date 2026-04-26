@@ -1127,6 +1127,7 @@ Generated {html.escape(generated_at)}<br>
 
         if self._web_remote and self._web_remote._running:
             self._web_remote.set_operators(settings.operator_names)
+            self._web_remote.set_operator_colors(settings.operator_colors)
             self._web_remote.set_remote_password(settings.remote_password)
 
         # Re-render current/next cards so operator list changes take effect
@@ -1147,6 +1148,7 @@ Generated {html.escape(generated_at)}<br>
             return
         self._web_remote = WebRemoteServer(port=8080)
         self._web_remote.set_operators(self._show_settings.operator_names)
+        self._web_remote.set_operator_colors(self._show_settings.operator_colors)
         self._web_remote.set_remote_password(self._show_settings.remote_password)
         self._web_remote.start()
         self._btn_remote.setText(" Remote ON")

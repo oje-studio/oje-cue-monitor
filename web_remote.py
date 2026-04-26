@@ -66,6 +66,7 @@ class WebRemoteServer:
         self._clients: Set[web.WebSocketResponse] = set()
         self._running = False
         self._operator_names: List[str] = []
+        self._operator_colors: Dict[str, str] = {}
         self._remote_password: str = ""
         self._current_state: Dict = {
             "fps": 25.0,
@@ -87,6 +88,12 @@ class WebRemoteServer:
 
     def set_operators(self, names: List[str]):
         self._operator_names = names
+
+    def set_operator_colors(self, colors: Dict[str, str]):
+        """Per-operator colour overrides ({role: '#rrggbb'}).  Empty
+        is fine — the renderer falls back to ui.theme.operator_color()
+        for any role not in the map."""
+        self._operator_colors = dict(colors or {})
 
     def set_remote_password(self, password: str):
         self._remote_password = password or ""
@@ -189,6 +196,7 @@ class WebRemoteServer:
         html = _render_page(
             operator,
             self._operator_names,
+            self._operator_colors,
             self.base_url,
             authenticated=authenticated_for_render,
             password_required=bool(self._remote_password),
@@ -267,6 +275,7 @@ def _cue_to_dict(cue) -> Optional[Dict]:
 def _render_page(
     operator_filter: Optional[str],
     operator_names: List[str],
+    operator_colors: Dict[str, str],
     base_url: str,
     *,
     authenticated: bool,
@@ -275,6 +284,18 @@ def _render_page(
     title = f"ØJE CUE MONITOR — {operator_filter}" if operator_filter else "ØJE CUE MONITOR"
     filter_js = json.dumps(operator_filter) if operator_filter else "null"
     operators_js = json.dumps(operator_names)
+    # Pre-compute the per-operator semantic colour the JS render
+    # functions inject as inline style on each .op-name element.
+    # Override map (from settings) wins; otherwise theme.operator_color
+    # resolves the role through the alias map (Lighting/Audio/StageMgr)
+    # or the stable cycle palette — same precedence as the Mac
+    # PerformanceView._operator_color (d2).
+    from ui import theme as _theme
+    resolved = {}
+    for name in operator_names:
+        resolved[name] = (operator_colors.get(name)
+                          or _theme.operator_color(name, tuple(operator_names)))
+    op_colors_js = json.dumps(resolved)
     authed_js = "true" if authenticated else "false"
     password_required_js = "true" if password_required else "false"
     auth_copy = (
@@ -336,8 +357,8 @@ body {{
 
 /* ── Top status bar (mirrors Performance Mode) ──────────────────────────── */
 .statusbar {{
-    background: #0a0a0a;
-    border-bottom: 1px solid #1a1a1a;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-subtle);
     padding: 10px 20px;
     display: flex;
     align-items: center;
@@ -357,25 +378,25 @@ body {{
 }}
 .statusbar > * {{ white-space: nowrap; }}
 .statusbar .dot {{
-    color: #d75a5a;
+    color: var(--danger);
     line-height: 1;
 }}
-.statusbar .dot.ok {{ color: #4bc373; }}
+.statusbar .dot.ok {{ color: var(--success); }}
 .statusbar .tc {{
-    color: #f0f0f0;
+    color: var(--text-primary);
     /* Reserve max width for HH:MM:SS so the bar doesn't reflow when
        the value goes from "--:--:--" to "10:00:00". (Frames stripped
        client-side for smoother updates — see trimTC.) */
     min-width: 8ch;
     text-align: center;
 }}
-.statusbar .meta {{ color: #858585; }}
+.statusbar .meta {{ color: var(--text-muted); }}
 .statusbar .clock {{
-    color: #dcdcdc;
+    color: var(--text-primary);
     min-width: 8ch;
     text-align: center;
 }}
-.statusbar .sep {{ color: #5a5a5a; opacity: 0.7; }}
+.statusbar .sep {{ color: var(--text-dim); opacity: 0.7; }}
 
 /* ── 5-bar VU meter (CSS only, mirrors the Mac one) ─────────────────────── */
 .vu {{
@@ -384,21 +405,24 @@ body {{
     gap: 2px;
     height: 18px;
 }}
+/* VU "lit" slots use the same semantic palette as the rest of the
+   app (success green, warning amber, danger red).  Unlit slots are
+   dim members of the same hue family. */
 .vu .bar {{
     width: 10px;
     height: 100%;
     border-radius: 1px;
-    background: #1a3320;          /* dark green when unlit */
+    background: rgba(54, 179, 126, 0.12);   /* dim success */
 }}
-.vu .bar:nth-child(4) {{ background: #37280f; }}     /* amber slot, unlit */
-.vu .bar:nth-child(5) {{ background: #3c1414; }}     /* red slot, unlit */
-.vu .bar.lit:nth-child(-n+3) {{ background: #4bc373; }}
-.vu .bar.lit:nth-child(4)    {{ background: #e18730; }}
-.vu .bar.lit:nth-child(5)    {{ background: #d74b4b; }}
+.vu .bar:nth-child(4) {{ background: rgba(245, 165, 36, 0.12); }}  /* dim warning */
+.vu .bar:nth-child(5) {{ background: rgba(229, 72, 77, 0.12); }}   /* dim danger */
+.vu .bar.lit:nth-child(-n+3) {{ background: var(--success); }}
+.vu .bar.lit:nth-child(4)    {{ background: var(--warning); }}
+.vu .bar.lit:nth-child(5)    {{ background: var(--danger); }}
 
 /* ── Main current-cue area — fills remaining height ──────────────────────── */
 .main {{
-    background: #090909;
+    background: var(--bg-app);
     padding: 22px clamp(20px, 6vw, 64px);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
@@ -411,17 +435,17 @@ body {{
     display: flex;
     align-items: center;
     gap: 10px;
-    color: #4a4a4a;
+    color: var(--text-dim);
 }}
 .tag {{
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 3px;
 }}
 .group {{
-    color: #7a7acd;
+    color: var(--info);
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 1px;
 }}
 .cue-name {{
@@ -430,11 +454,11 @@ body {{
     font-size: clamp(28px, 7vw, 64px);
     font-weight: 800;
     line-height: 1.05;
-    color: #ffffff;
+    color: var(--text-bright);
 }}
 .cue-desc {{
     font-size: clamp(14px, 2.6vw, 22px);
-    color: #999999;
+    color: var(--text-muted);
     line-height: 1.35;
 }}
 .operators {{
@@ -446,15 +470,17 @@ body {{
     margin-top: 4px;
 }}
 .op-card {{
-    background: #111118;
-    border-radius: 8px;
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
     padding: 12px 14px;
-    border: 1px solid #1c1c25;
+    border: 1px solid var(--border);
 }}
 .op-name {{
+    /* Per-operator semantic colour comes from inline style="color:..."
+       set by renderOps() — Lighting blue, Audio amber, Stage Manager
+       purple, etc.  This rule sets everything BUT the colour. */
     font-size: 10px;
-    color: #7a7acd;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
     margin-bottom: 4px;
@@ -469,8 +495,8 @@ body {{
 
 /* ── Bottom: Next cue strip ──────────────────────────────────────────────── */
 .next-strip {{
-    background: #050505;
-    border-top: 2px solid #1a1a1a;
+    background: var(--bg-header);
+    border-top: 1px solid var(--border-subtle);
     padding: 16px clamp(20px, 5vw, 40px);
     display: grid;
     grid-template-columns: 1fr auto;
@@ -486,22 +512,22 @@ body {{
 .next-info {{ min-width: 0; }}
 .next-tag {{
     font-size: 10px;
-    color: #4a4a4a;
-    font-weight: 700;
+    color: var(--text-dim);
+    font-weight: 600;
     letter-spacing: 2px;
     margin-bottom: 2px;
 }}
 .next-name {{
     font-size: clamp(16px, 3.6vw, 26px);
     font-weight: 700;
-    color: #cccccc;
+    color: var(--text-primary);
     line-height: 1.2;
     overflow: hidden;
     text-overflow: ellipsis;
 }}
 .next-desc {{
     font-size: clamp(11px, 2vw, 15px);
-    color: #555555;
+    color: var(--text-muted);
     margin-top: 2px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -510,14 +536,14 @@ body {{
     font-family: 'Menlo', monospace;
     font-size: clamp(24px, 5.5vw, 40px);
     font-weight: 800;
-    color: #ffffff;
+    color: var(--text-bright);
     letter-spacing: 0.5px;
     /* Reserve enough width for "in MM:SS" so layout doesn't twitch
        when countdown changes from 9 to 10 seconds. */
     min-width: 7ch;
     text-align: right;
 }}
-.countdown.urgent {{ color: #dc4040; }}
+.countdown.urgent {{ color: var(--danger); }}
 .next-ops {{
     grid-column: 1 / -1;
     display: flex;
@@ -530,6 +556,12 @@ body {{
     color: #e6c840;
     font-style: italic;
     white-space: pre-wrap;
+}}
+.next-op-name {{
+    /* Per-operator semantic colour set inline by renderNextOps. */
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: 0.5px;
 }}
 .hidden {{ display: none !important; }}
 .overlay {{
@@ -755,6 +787,7 @@ body {{
 <script>
 const OPERATOR_FILTER = {filter_js};
 const OPERATOR_NAMES = {operators_js};
+const OPERATOR_COLORS = {op_colors_js};
 const AUTHENTICATED = {authed_js};
 const PASSWORD_REQUIRED = {password_required_js};
 let ws;
@@ -949,6 +982,13 @@ function render(state) {{
     }}
 }}
 
+function opColor(name) {{
+    // Per-operator semantic colour resolved by Python (override map
+    // > theme alias > fallback cycle).  Defaults to muted text if
+    // we somehow get a name we didn't pre-resolve.
+    return OPERATOR_COLORS[name] || 'var(--text-muted)';
+}}
+
 function renderOps(containerId, comments) {{
     const el = document.getElementById(containerId);
     el.innerHTML = '';
@@ -962,7 +1002,8 @@ function renderOps(containerId, comments) {{
     }} else {{
         for (const [name, comment] of Object.entries(comments)) {{
             if (!comment) continue;
-            el.innerHTML += '<div class="op-card"><div class="op-name">' +
+            el.innerHTML += '<div class="op-card"><div class="op-name" style="color:' +
+                opColor(name) + '">' +
                 escHtml(name) + '</div><div class="op-comment">' +
                 escHtml(comment) + '</div></div>';
         }}
@@ -981,7 +1022,10 @@ function renderNextOps(comments) {{
     }} else {{
         for (const [name, comment] of Object.entries(comments)) {{
             if (!comment) continue;
-            el.innerHTML += '<span class="next-op">' + escHtml(name) + ': ' + escHtml(comment) + '</span>';
+            el.innerHTML += '<span class="next-op">' +
+                '<span class="next-op-name" style="color:' + opColor(name) + '">' +
+                escHtml(name) + ':</span> ' +
+                escHtml(comment) + '</span>';
         }}
     }}
 }}
