@@ -1163,19 +1163,42 @@ tr.section td {{
             doc.documentLayout().setPaintDevice(printer)
 
             page_rect_dp = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
-            doc.setPageSize(page_rect_dp.size())
+            page_w_dp = page_rect_dp.width()
+            page_h_dp = page_rect_dp.height()
+
+            # Reserve the bottom of each page for the footer band so
+            # the body doesn't paint underneath it.  Footer rendered
+            # via QPainter overlay below — see _paint_pdf_footer.
+            pt_to_dp = printer.resolution() / 72.0
+            footer_h_dp = _PDF_FOOTER_H_PT * pt_to_dp
+            body_h_dp = page_h_dp - footer_h_dp
+
+            doc.setPageSize(QSizeF(page_w_dp, body_h_dp))
             page_count = max(doc.pageCount(), 1)
             full_doc_rect = QRectF(
-                0, 0, page_rect_dp.width(),
-                page_rect_dp.height() * page_count,
+                0, 0, page_w_dp, body_h_dp * page_count
+            )
+
+            copyright_text = (
+                f"© {datetime.now().year} ØJE Studio — Vienna · oje.studio"
             )
 
             for i in range(page_count):
                 if i > 0:
                     printer.newPage()
+                # Body
                 painter.save()
-                painter.translate(0, -i * page_rect_dp.height())
+                painter.translate(0, -i * body_h_dp)
                 doc.drawContents(painter, full_doc_rect)
+                painter.restore()
+                # Footer overlay (every page)
+                painter.save()
+                painter.translate(0, body_h_dp)
+                _paint_pdf_footer(
+                    painter, page_w_dp, footer_h_dp, pt_to_dp,
+                    page_idx=i, total_pages=page_count,
+                    copyright_text=copyright_text,
+                )
                 painter.restore()
         finally:
             painter.end()
@@ -2193,6 +2216,97 @@ def _help_btn_style() -> str:
         f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; "
         f"border-color: {theme.BORDER_STRONG}; }}"
     )
+
+
+# Reserved height (points) for the footer band on every PDF page.
+# Includes the spec's 9pt top + 9pt bottom padding plus an 8.5 pt
+# text line, with a sliver of slack for descenders / metric drift.
+_PDF_FOOTER_H_PT = 30
+
+
+def _paint_pdf_footer(painter, page_w_dp: float, footer_h_dp: float,
+                      pt_to_dp: float, *, page_idx: int, total_pages: int,
+                      copyright_text: str) -> None:
+    """
+    Cream footer band painted on top of every page after the body.
+    Layout per spec:
+       Left:   © 2026 ØJE Studio — Vienna · oje.studio
+       Right:  CONFIDENTIAL    p. X / Y
+
+    All measurements are computed in points and scaled to device
+    pixels at the printer's resolution so the band looks identical
+    on screen-DPI test devices and 1200-DPI printers.
+    """
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QBrush, QColor, QFont
+
+    # Background + top hairline border.
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor("#f5f2ed")))
+    painter.drawRect(QRectF(0, 0, page_w_dp, footer_h_dp))
+    painter.setPen(QColor("#e0d8cf"))
+    border_w = max(1, round(0.5 * pt_to_dp))
+    painter.drawRect(QRectF(0, 0, page_w_dp, border_w))
+    painter.restore()
+
+    # Internal padding mirrors the spec's `9px 24px`.
+    pad_x = 24 * pt_to_dp
+    text_y = footer_h_dp / 2  # vertical centre of the band
+
+    # Left: copyright in #aaa, 8.5pt sans, slight tracking.
+    painter.save()
+    f = QFont("Helvetica")
+    f.setPointSizeF(8.5)
+    painter.setFont(f)
+    painter.setPen(QColor("#aaa"))
+    left_rect = QRectF(pad_x, 0, page_w_dp / 2 - pad_x, footer_h_dp)
+    painter.drawText(
+        left_rect,
+        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+        copyright_text,
+    )
+    painter.restore()
+
+    # Right side has two pieces with a 14pt gap: CONFIDENTIAL flag +
+    # page-number readout.  Painted right-to-left so the gap stays
+    # the spec's 14pt no matter how wide either string ends up.
+    page_num_text = f"p. {page_idx + 1} / {total_pages}"
+    painter.save()
+    f_num = QFont("Courier")
+    f_num.setPointSizeF(8.5)
+    painter.setFont(f_num)
+    fm_num = painter.fontMetrics()
+    num_w = fm_num.horizontalAdvance(page_num_text)
+    num_x = page_w_dp - pad_x - num_w
+    painter.setPen(QColor("#bbb"))
+    painter.drawText(
+        QRectF(num_x, 0, num_w, footer_h_dp),
+        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+        page_num_text,
+    )
+    painter.restore()
+
+    painter.save()
+    f_conf = QFont("Helvetica")
+    f_conf.setPointSizeF(8)
+    f_conf.setWeight(QFont.Weight.Bold)
+    painter.setFont(f_conf)
+    fm_conf = painter.fontMetrics()
+    conf_text = "CONFIDENTIAL"
+    conf_w = fm_conf.horizontalAdvance(conf_text)
+    gap_dp = 14 * pt_to_dp
+    conf_x = num_x - gap_dp - conf_w
+    # Confidential red at 75 % opacity → solid ~#cc625a equivalent.
+    conf_color = QColor("#c0392b")
+    conf_color.setAlphaF(0.75)
+    painter.setPen(conf_color)
+    painter.drawText(
+        QRectF(conf_x, 0, conf_w, footer_h_dp),
+        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+        conf_text,
+    )
+    painter.restore()
 
 
 def _find_logo_path(settings) -> Optional[str]:
