@@ -427,7 +427,7 @@ body {{
     font-style: italic;
     white-space: pre-wrap;
 }}
-.hidden {{ display: none; }}
+.hidden {{ display: none !important; }}
 .overlay {{
     position: fixed;
     inset: 0;
@@ -784,15 +784,9 @@ async function submitAuth() {{
     const errorEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('auth-submit');
     const overlay = document.getElementById('auth-overlay');
-    // Visible breadcrumb — if you see "click captured" appear in the error
-    // line and then disappear, the handler IS firing. If you never see it,
-    // the click never reached this function.
-    errorEl.style.color = '#7ad07a';
-    errorEl.textContent = 'click captured…';
-    setTimeout(() => {{ errorEl.textContent = ''; errorEl.style.color = ''; }}, 600);
-
     // Guard against the form firing submit twice (e.g. Enter + click).
     if (submitBtn.disabled) return;
+    errorEl.textContent = '';
 
     // No-password fast path: there's nothing to authenticate against, so
     // skip the /auth roundtrip entirely. Apply the operator filter
