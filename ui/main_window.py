@@ -34,7 +34,7 @@ from web_remote import WebRemoteServer
 logger = logging.getLogger(__name__)
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "v0.97β"
+VERSION   = "v1.0β"
 COPYRIGHT = "© 2026 ØJE Studio"
 WEBSITE   = "oje.studio"
 EMAIL     = "hello@oje.studio"

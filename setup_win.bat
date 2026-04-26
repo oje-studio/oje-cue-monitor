@@ -2,7 +2,7 @@
 chcp 65001 >nul 2>&1
 echo.
 echo ╔══════════════════════════════════════╗
-echo ║   OJE CUE MONITOR  v0.97beta        ║
+echo ║   OJE CUE MONITOR  v1.0beta         ║
 echo ║   Setup for Windows x64             ║
 echo ║   © 2026 OJE Studio                 ║
 echo ╚══════════════════════════════════════╝
