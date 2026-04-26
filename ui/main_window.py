@@ -1336,7 +1336,12 @@ Generated {html.escape(generated_at)}<br>
 
         if self._web_remote and self._web_remote._running:
             self._web_remote.broadcast_state(
-                current, nxt, countdown, tc_str, cur_group, nxt_group
+                current, nxt, countdown, tc_str, cur_group, nxt_group,
+                fps=self._last_fps,
+                db=self._last_db,
+                signal_ok=self._signal_ok,
+                running=self._running,
+                signal_warning=self._signal_warning_text,
             )
 
     def _refresh_signal_dot(self):

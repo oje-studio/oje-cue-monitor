@@ -66,6 +66,11 @@ class WebRemoteServer:
         self._operator_names: List[str] = []
         self._remote_password: str = ""
         self._current_state: Dict = {
+            "fps": 25.0,
+            "db": -120.0,
+            "signal_ok": False,
+            "running": False,
+            "signal_warning": "",
             "current_cue": None,
             "next_cue": None,
             "countdown": None,
@@ -102,7 +107,10 @@ class WebRemoteServer:
             self._thread = None
 
     def broadcast_state(self, current_cue, next_cue, countdown: Optional[float],
-                        timecode: str, current_group: str = "", next_group: str = ""):
+                        timecode: str, current_group: str = "", next_group: str = "",
+                        fps: float = 25.0, db: float = -120.0,
+                        signal_ok: bool = False, running: bool = False,
+                        signal_warning: str = ""):
         state = {
             "current_cue": _cue_to_dict(current_cue),
             "next_cue": _cue_to_dict(next_cue),
@@ -110,6 +118,13 @@ class WebRemoteServer:
             "timecode": timecode,
             "current_group": current_group,
             "next_group": next_group,
+            # Mirror what the operator sees on the Mac's Performance bar so
+            # the web view can show the same status at a glance.
+            "fps": float(fps),
+            "db": float(db),
+            "signal_ok": bool(signal_ok),
+            "running": bool(running),
+            "signal_warning": str(signal_warning or ""),
         }
         self._current_state = state
 
@@ -263,166 +278,205 @@ def _render_page(
 <title>{title}</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-html {{
-    height: 100%;
-    background: #000;
-}}
+html {{ background: #000; }}
 body {{
     background: #000;
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-    min-height: 100vh;
-    min-height: 100svh;
-    min-height: 100dvh;
+    /* 100dvh — dynamic viewport — keeps the layout pegged to whatever
+       slice of screen Safari is actually exposing right now (URL bar
+       up, URL bar collapsed, gesture pull, etc). Fallback to svh/vh. */
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    /* Grid layout — three rows, each owns its space, no flex-shifting
+       when cue text changes length between updates. */
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 100%;
+    /* Honour notch / home-indicator on iPhone */
     padding-top: env(safe-area-inset-top, 0px);
     padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     padding-left: env(safe-area-inset-left, 0px);
 }}
-.header {{
+
+/* ── Top status bar (mirrors Performance Mode) ──────────────────────────── */
+.statusbar {{
     background: #0a0a0a;
-    padding: 8px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     border-bottom: 1px solid #1a1a1a;
-    gap: 12px;
-    flex-shrink: 0;
-}}
-.header-left,
-.header-right {{
+    padding: 10px 20px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    min-width: 0;
-}}
-.header .tc {{
-    font-family: 'Menlo', 'Courier New', monospace;
-    font-size: 14px;
-    color: #333;
-    flex: 1;
-    text-align: center;
-    min-width: 0;
-}}
-.header .clock {{
-    font-family: 'Menlo', monospace;
-    font-size: 13px;
-    color: #444;
-}}
-.header .title {{
-    font-size: 11px;
-    color: #444;
-    font-weight: bold;
-    letter-spacing: 2px;
-}}
-.main {{
-    flex: 1;
-    display: flex;
-    flex-direction: column;
     justify-content: center;
-    padding: 24px 32px;
-    gap: 16px;
-    min-height: 0;
+    gap: 14px;
+    flex-wrap: wrap;
+    min-height: 48px;
+}}
+.statusbar .dot {{
+    color: #d75a5a;
+    font-size: 16px;
+    line-height: 1;
+}}
+.statusbar .dot.ok {{ color: #4bc373; }}
+.statusbar .tc {{
+    font-family: 'Menlo', 'Courier New', monospace;
+    font-size: clamp(20px, 5vw, 28px);
+    font-weight: 700;
+    color: #f0f0f0;
+    letter-spacing: 0.5px;
+    /* Reserve max width for HH:MM:SS:FF so the bar doesn't reflow when
+       the value goes from "--" to "10:00:00:00". */
+    min-width: 9.5ch;
+    text-align: center;
+}}
+.statusbar .meta {{
+    font-family: 'Menlo', monospace;
+    font-size: clamp(12px, 2.6vw, 14px);
+    font-weight: 700;
+    color: #858585;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+}}
+.statusbar .clock {{
+    font-family: 'Menlo', monospace;
+    font-size: clamp(16px, 3.5vw, 22px);
+    font-weight: 700;
+    color: #dcdcdc;
+    min-width: 8ch;
+    text-align: center;
+}}
+.statusbar .sep {{ color: #3d3d3d; font-size: 14px; }}
+
+/* ── Main current-cue area — fills remaining height ──────────────────────── */
+.main {{
+    background: #090909;
+    padding: 22px clamp(20px, 6vw, 64px);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+}}
+.tag-row {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #4a4a4a;
 }}
 .tag {{
     font-size: 11px;
-    color: #4a4a4a;
-    font-weight: bold;
+    font-weight: 700;
     letter-spacing: 3px;
-    margin-bottom: 4px;
 }}
 .group {{
     color: #7a7acd;
-    font-size: 13px;
-    font-weight: bold;
-    margin-left: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
 }}
 .cue-name {{
-    font-size: clamp(28px, 8vw, 64px);
-    font-weight: bold;
-    line-height: 1.1;
-    margin-bottom: 8px;
+    /* clamp lets it scale on phones (28px) up to a reasonable 64 on a
+       laptop without rampaging on a 4 K display. */
+    font-size: clamp(28px, 7vw, 64px);
+    font-weight: 800;
+    line-height: 1.05;
+    color: #ffffff;
 }}
 .cue-desc {{
-    font-size: clamp(14px, 3vw, 26px);
-    color: #999;
-    margin-bottom: 16px;
+    font-size: clamp(14px, 2.6vw, 22px);
+    color: #999999;
+    line-height: 1.35;
 }}
 .operators {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
+    display: grid;
+    /* auto-fit so 1/2/3+ operators tile naturally; minmax keeps each
+       card readable on phone. */
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    margin-top: 4px;
 }}
 .op-card {{
     background: #111118;
     border-radius: 8px;
-    padding: 12px 16px;
-    flex: 1;
-    min-width: 150px;
-}}
-.op-card.solo {{
-    min-width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #1c1c25;
 }}
 .op-name {{
-    font-size: 11px;
+    font-size: 10px;
     color: #7a7acd;
-    font-weight: bold;
-    letter-spacing: 1px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
     margin-bottom: 4px;
 }}
 .op-comment {{
-    font-size: clamp(16px, 4vw, 28px);
+    font-size: clamp(15px, 3vw, 22px);
     color: #e6c840;
     word-wrap: break-word;
     white-space: pre-wrap;
+    line-height: 1.35;
 }}
-.divider {{
-    border-top: 1px solid #222;
-    margin: 8px 0;
-}}
-.next-section {{
-    padding: 20px 32px;
+
+/* ── Bottom: Next cue strip ──────────────────────────────────────────────── */
+.next-strip {{
     background: #050505;
     border-top: 2px solid #1a1a1a;
-    flex-shrink: 0;
-}}
-.next-row {{
-    display: flex;
+    padding: 16px clamp(20px, 5vw, 40px);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 16px;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
+    /* Reserve a stable height — empty next still keeps the strip there
+       so the main area doesn't grow when the show ends. */
+    min-height: 78px;
+}}
+.next-info {{ min-width: 0; }}
+.next-tag {{
+    font-size: 10px;
+    color: #4a4a4a;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
 }}
 .next-name {{
-    font-size: clamp(18px, 4vw, 32px);
-    font-weight: bold;
-    color: #ccc;
+    font-size: clamp(16px, 3.6vw, 26px);
+    font-weight: 700;
+    color: #cccccc;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 .next-desc {{
-    font-size: clamp(12px, 2.5vw, 18px);
-    color: #555;
+    font-size: clamp(11px, 2vw, 15px);
+    color: #555555;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 .countdown {{
     font-family: 'Menlo', monospace;
-    font-size: clamp(24px, 6vw, 48px);
-    font-weight: bold;
-    color: #fff;
+    font-size: clamp(24px, 5.5vw, 40px);
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+    /* Reserve enough width for "in MM:SS" so layout doesn't twitch
+       when countdown changes from 9 to 10 seconds. */
+    min-width: 7ch;
+    text-align: right;
 }}
-.countdown.urgent {{
-    color: #dc4040;
-}}
+.countdown.urgent {{ color: #dc4040; }}
 .next-ops {{
+    grid-column: 1 / -1;
     display: flex;
-    gap: 16px;
-    margin-top: 8px;
     flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
 }}
 .next-op {{
-    font-size: 14px;
+    font-size: clamp(11px, 2.2vw, 14px);
     color: #e6c840;
     font-style: italic;
     white-space: pre-wrap;
@@ -523,72 +577,26 @@ body {{
     font-weight: bold;
     z-index: 999;
 }}
-@media (max-width: 700px) {{
-    body {{
-        overflow: auto;
-    }}
-    .header {{
+/* Phone-specific tweaks. The base layout is already mobile-first via
+   clamp() and grid auto-fit, this just trims spacing on small screens. */
+@media (max-width: 600px) {{
+    .statusbar {{
         padding: 8px 12px;
-    }}
-    .header-left,
-    .header-right {{
         gap: 8px;
     }}
-    .header .title,
-    .header .clock {{
-        display: none;
-    }}
-    .header .tc {{
-        text-align: right;
-        font-size: 13px;
-    }}
-    .mini-btn {{
-        padding: 4px 8px;
+    .statusbar .sep,
+    .statusbar #fps {{
+        display: none;       /* keep TC + signal state + clock — drop FPS for space */
     }}
     .main {{
-        justify-content: flex-start;
-        padding: 18px 16px;
-        gap: 12px;
+        padding: 16px 16px;
     }}
-    .cue-name {{
-        font-size: clamp(24px, 9vw, 40px);
-    }}
-    .cue-desc {{
-        font-size: clamp(14px, 4.2vw, 20px);
-        margin-bottom: 10px;
+    .next-strip {{
+        padding: 12px 16px;
+        min-height: 64px;
     }}
     .operators {{
-        gap: 10px;
-    }}
-    .op-card {{
-        min-width: 100%;
-        padding: 10px 12px;
-    }}
-    .op-comment {{
-        font-size: clamp(16px, 5.2vw, 24px);
-    }}
-    .next-section {{
-        padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
-    }}
-    .next-row {{
-        align-items: flex-start;
-        gap: 12px;
-    }}
-    .next-name {{
-        font-size: clamp(18px, 5vw, 26px);
-    }}
-    .next-desc {{
-        font-size: clamp(12px, 3.6vw, 16px);
-    }}
-    .countdown {{
-        font-size: clamp(22px, 8vw, 34px);
-    }}
-    .next-ops {{
-        gap: 8px;
-        margin-top: 6px;
-    }}
-    .next-op {{
-        font-size: 13px;
+        grid-template-columns: 1fr;     /* one card per row on phone */
     }}
 }}
 </style>
@@ -614,19 +622,24 @@ body {{
     </form>
 </div>
 
-<div class="header">
-    <div class="header-left">
-        <span class="title">{title.upper()}</span>
-        <button id="access-btn" class="mini-btn" type="button">Access</button>
-    </div>
+<!-- Top status bar — same shape as the Performance Mode header. -->
+<div class="statusbar">
+    <span class="dot" id="signal-dot">●</span>
     <span class="tc" id="timecode">--:--:--:--</span>
-    <div class="header-right">
-        <span class="clock" id="clock"></span>
-    </div>
+    <span class="sep">|</span>
+    <span class="meta" id="fps">FPS --</span>
+    <span class="sep">|</span>
+    <span class="meta" id="signal-state">NO SIGNAL</span>
+    <span class="sep">|</span>
+    <span class="meta" id="signal-db">−∞ dB</span>
+    <span class="sep">|</span>
+    <span class="clock" id="clock">--:--:--</span>
+    <button id="access-btn" class="mini-btn" type="button" style="margin-left:8px;">Access</button>
 </div>
 
-<div class="main" id="current-section">
-    <div>
+<!-- Current cue — owns the flexible row. -->
+<div class="main">
+    <div class="tag-row">
         <span class="tag">CURRENT CUE</span>
         <span class="group" id="cur-group"></span>
     </div>
@@ -635,16 +648,14 @@ body {{
     <div class="operators" id="cur-ops"></div>
 </div>
 
-<div class="next-section">
-    <div class="next-row">
-        <div>
-            <span class="tag">NEXT</span>
-            <span class="group" id="next-group"></span>
-        </div>
-        <div class="countdown" id="countdown"></div>
+<!-- Next cue strip — pinned to bottom, fixed minimum height. -->
+<div class="next-strip">
+    <div class="next-info">
+        <div class="next-tag">NEXT &nbsp;<span class="group" id="next-group"></span></div>
+        <div class="next-name" id="next-name">—</div>
+        <div class="next-desc" id="next-desc"></div>
     </div>
-    <div class="next-name" id="next-name">—</div>
-    <div class="next-desc" id="next-desc"></div>
+    <div class="countdown" id="countdown"></div>
     <div class="next-ops" id="next-ops"></div>
 </div>
 
@@ -682,6 +693,50 @@ function render(state) {{
     document.getElementById('timecode').textContent = state.timecode || '--:--:--:--';
     document.getElementById('cur-group').textContent = state.current_group ? '[' + state.current_group + ']' : '';
     document.getElementById('next-group').textContent = state.next_group ? '[' + state.next_group + ']' : '';
+
+    // ── Status bar ──
+    // Signal dot + state text mirror Performance Mode's three-state UI:
+    //   running + signal_ok    → green, "LIVE"
+    //   running + no signal    → red,   "NO SIGNAL"
+    //   not running             → grey,  "OFF"
+    const dot = document.getElementById('signal-dot');
+    const stateLbl = document.getElementById('signal-state');
+    if (!state.running) {{
+        dot.className = 'dot';
+        dot.style.color = '#3d3d3d';
+        stateLbl.textContent = 'OFF';
+        stateLbl.style.color = '#555';
+    }} else if (state.signal_ok) {{
+        dot.className = 'dot ok';
+        dot.style.color = '';
+        stateLbl.textContent = state.signal_warning || 'LIVE';
+        stateLbl.style.color = state.signal_warning ? '#e6c840' : '#4bc373';
+    }} else {{
+        dot.className = 'dot';
+        dot.style.color = '';
+        stateLbl.textContent = 'NO SIGNAL';
+        stateLbl.style.color = '#d75a5a';
+    }}
+
+    // FPS
+    const fps = state.fps;
+    document.getElementById('fps').textContent =
+        (typeof fps === 'number' && fps > 0) ? 'FPS ' + fps.toFixed(2) : 'FPS --';
+
+    // dB level
+    const db = state.db;
+    const dbEl = document.getElementById('signal-db');
+    if (typeof db === 'number' && db > -120) {{
+        dbEl.textContent = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
+        // Colour follows the same banding as the Mac VU meter:
+        //   above -3 dBFS → red (clipping)
+        //   above -12 dBFS → amber (good level)
+        //   below          → grey
+        dbEl.style.color = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#7a7a7a');
+    }} else {{
+        dbEl.textContent = '−∞ dB';
+        dbEl.style.color = '#7a7a7a';
+    }}
 
     const cur = state.current_cue;
     if (cur) {{
