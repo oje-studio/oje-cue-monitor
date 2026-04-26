@@ -547,7 +547,8 @@ class PerformanceView(QWidget):
         name_size = self._settings.perf_operator_name_size if self._settings else 12
 
         for name in self._operator_names:
-            card = _OperatorCard(name, op_size, name_size)
+            card = _OperatorCard(name, op_size, name_size,
+                                 name_color=self._operator_color(name))
             self._ops_hlay.addWidget(card)
             self._op_widgets.append(card)
 
@@ -565,6 +566,20 @@ class PerformanceView(QWidget):
             lbl.setWordWrap(True)
             self._next_ops_hlay.addWidget(lbl)
             self._next_op_labels.append(lbl)
+
+    def _operator_color(self, name: str) -> str:
+        """
+        Resolve an operator role name to its display colour.  An
+        explicit override in settings.operator_colors wins; otherwise
+        ui.theme.operator_color() picks a sensible colour from the
+        alias map (Lighting / Audio / Stage Manager) or the fallback
+        cycle for unknown roles.
+        """
+        if self._settings and self._settings.operator_colors:
+            override = self._settings.operator_colors.get(name)
+            if override:
+                return override
+        return theme.operator_color(name, tuple(self._operator_names))
 
     def _update_operator_cards(self, cue):
         comments = cue.operator_comments if hasattr(cue, "operator_comments") else {}
@@ -741,24 +756,34 @@ class _AutoShrinkLabel(QLabel):
 class _OperatorCard(QWidget):
     """A single operator column card with name header + comment."""
 
-    def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12, parent=None):
+    def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12,
+                 name_color: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.op_name = op_name
         self._base_font_size = font_size
         self.setStyleSheet(
-            "background: #111118; border-radius: 8px;"
+            f"background: {theme.BG_SURFACE}; "
+            f"border-radius: {theme.RADIUS_LG}px;"
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(4)
 
-        self._name_lbl = QLabel(op_name)
+        # Operator role colour: per-operator override from settings if
+        # provided, otherwise theme.operator_color() resolves the role
+        # name through the alias map (Lighting → blue, Audio → amber,
+        # Stage Manager → purple) or the stable cycle palette.  Each
+        # operator on the stage monitor immediately spots their own
+        # column without reading the label.
+        resolved_color = name_color or theme.operator_color(op_name)
+
+        self._name_lbl = QLabel(op_name.upper())
         f_name = QFont()
         f_name.setPointSize(name_size)
         f_name.setBold(True)
         self._name_lbl.setFont(f_name)
         self._name_lbl.setStyleSheet(
-            "color: #7a7acd; letter-spacing: 1px; background: transparent;"
+            f"color: {resolved_color}; letter-spacing: 1.5px; background: transparent;"
         )
         lay.addWidget(self._name_lbl)
 
@@ -768,6 +793,8 @@ class _OperatorCard(QWidget):
         f_comment = QFont()
         f_comment.setPointSize(font_size)
         self._comment_lbl.setFont(f_comment)
+        # Comment text colour goes WHITE in d3; keep the existing amber
+        # for now so this step only changes the role-name colour.
         self._comment_lbl.setStyleSheet("color: #e6c840; background: transparent;")
         lay.addWidget(self._comment_lbl)
 
