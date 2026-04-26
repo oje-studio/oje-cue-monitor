@@ -345,12 +345,19 @@ class PerformanceView(QWidget):
         self.setMouseTracking(True)
 
         self._copyright_lbl = QLabel(f"{APP_NAME}  {COPYRIGHT}", self)
-        self._copyright_lbl.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
+        self._copyright_lbl.setStyleSheet(
+            f"color: {theme.TEXT_DISABLED}; font-size: 11px; background: transparent;"
+        )
         self._copyright_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._cue_overlay = QFrame(self)
+        # Translucent dark panel — same surface vocabulary as the
+        # rest of the UI, with enough alpha that the operator can
+        # still see the live cue band through the overlay.
         self._cue_overlay.setStyleSheet(
-            "QFrame { background: rgba(6, 6, 6, 245); border: 1px solid #1f1f1f; border-radius: 12px; }"
+            f"QFrame {{ background: {theme.with_alpha(theme.BG_APP, 0.96)}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_LG}px; }}"
         )
         self._cue_overlay.hide()
 
@@ -362,14 +369,22 @@ class PerformanceView(QWidget):
         overlay_head.setSpacing(10)
 
         overlay_title = QLabel("FULL CUE LIST")
-        overlay_title.setStyleSheet("color: #dcdcdc; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        overlay_title.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; font-size: 16px; "
+            "font-weight: 600; letter-spacing: 2px;"
+        )
         overlay_head.addWidget(overlay_title)
         overlay_head.addStretch()
 
         self._cue_overlay_close_btn = QPushButton("Close")
         self._cue_overlay_close_btn.setFixedHeight(30)
         self._cue_overlay_close_btn.setStyleSheet(
-            "QPushButton { background: #181818; color: #c8c8c8; border: 1px solid #2a2a2a; border-radius: 6px; padding: 0 12px; }"
+            f"QPushButton {{ background: {theme.BG_RAISED}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; padding: 0 12px; }}"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
         )
         self._cue_overlay_close_btn.clicked.connect(self._hide_cue_overlay)
         overlay_head.addWidget(self._cue_overlay_close_btn)
@@ -377,10 +392,16 @@ class PerformanceView(QWidget):
 
         self._cue_list_widget = QListWidget()
         self._cue_list_widget.setStyleSheet(
-            "QListWidget { background: #0d0d0d; color: #d0d0d0; border: 1px solid #1d1d1d; border-radius: 8px; "
+            f"QListWidget {{ background: {theme.BG_APP}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; "
             "outline: none; font-size: 16px; }"
-            "QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #181818; }"
-            "QListWidget::item:selected { background: #214d86; color: #ffffff; }"
+            f"QListWidget::item {{ padding: 8px 10px; "
+            f"border-bottom: 1px solid {theme.BORDER_SUBTLE}; }}"
+            f"QListWidget::item:selected {{ "
+            f"background: {theme.with_alpha(theme.SEMANTIC_SUCCESS, 0.18)}; "
+            f"color: {theme.TEXT_BRIGHT}; }}"
         )
         overlay_lay.addWidget(self._cue_list_widget, stretch=1)
 
@@ -528,6 +549,7 @@ class PerformanceView(QWidget):
     def set_cues(self, cues: List):
         self._cues = list(cues)
         self._cue_list_widget.clear()
+        base_bg = QColor(theme.BG_APP)
         for cue in self._cues:
             if getattr(cue, "is_divider", False):
                 text = f"[SECTION] {cue.name}"
@@ -536,23 +558,28 @@ class PerformanceView(QWidget):
                 text = f"{tc}   {cue.name or '—'}"
             item = QListWidgetItem(text)
             if getattr(cue, "is_divider", False):
-                # Tan / amber to distinguish section dividers from
-                # operator labels (which are purple #7a7acd elsewhere).
-                item.setForeground(QColor("#dcc88a"))
-                item.setBackground(QColor("#231e14"))
+                # Neutral-grey section header — same vocabulary as the
+                # main cue table (b2).  Was a warm amber that clashed
+                # with the new operator-amber colour for Audio.
+                item.setForeground(QColor(theme.SECTION_TEXT))
+                item.setBackground(QColor(theme.SECTION_BG))
                 f = item.font()
                 f.setBold(True)
                 item.setFont(f)
             elif getattr(cue, "color", ""):
                 cue_color = _named_color(getattr(cue, "color", ""))
                 if cue_color is not None:
-                    # Background: dark version of the cue colour, still
-                    # recognisable. darker(260) used to render almost black.
-                    bg = cue_color.darker(170)
-                    item.setBackground(bg)
-                    item.setForeground(QColor("#ffffff"))
-                    # Plus a saturated swatch icon on the left so the colour
-                    # reads even when the operator skims the list quickly.
+                    # 14 % blend over the panel bg — a touch stronger
+                    # than the table's 7 % so the row still reads as
+                    # "tagged" inside the more compact overlay.  Plus a
+                    # saturated swatch icon on the left so the colour
+                    # reads even when the operator skims past quickly.
+                    inv = 1.0 - 0.14
+                    r = int(round(base_bg.red()   * inv + cue_color.red()   * 0.14))
+                    g = int(round(base_bg.green() * inv + cue_color.green() * 0.14))
+                    b = int(round(base_bg.blue()  * inv + cue_color.blue()  * 0.14))
+                    item.setBackground(QColor(r, g, b))
+                    item.setForeground(QColor(theme.TEXT_PRIMARY))
                     item.setIcon(_swatch_icon(cue_color))
             self._cue_list_widget.addItem(item)
         self._refresh_cue_overlay_selection()
