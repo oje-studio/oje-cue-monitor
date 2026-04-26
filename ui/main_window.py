@@ -1446,12 +1446,24 @@ Generated {html.escape(generated_at)}<br>
             )
 
     def _refresh_signal_dot(self):
-        color = ACCENT_GREEN.name() if self._signal_ok else ACCENT_RED.name()
+        # Steady state: green when LTC is locked, red otherwise.
+        # Routed through the design system so the indicator matches
+        # the active-cue green and the connection-lost banner red on
+        # the web remote — same colour, same meaning, anywhere it
+        # appears.
+        color = theme.SEMANTIC_SUCCESS if self._signal_ok else theme.SEMANTIC_DANGER
         self._signal_dot.setStyleSheet(f"color: {color}; font-size: 16px;")
 
     def _do_blink(self):
+        # While waiting for LTC the dot pulses between full danger
+        # red and a faded version of the same hue (25 % alpha) so the
+        # reader's eye registers "trying to lock" without competing
+        # with the timecode for attention.  Using the same base
+        # colour for both blink halves keeps the pulse readable on
+        # any monitor calibration.
         self._blink_state = not self._blink_state
-        color = ACCENT_RED.name() if self._blink_state else QColor(75, 18, 18).name()
+        color = (theme.SEMANTIC_DANGER if self._blink_state
+                 else theme.with_alpha(theme.SEMANTIC_DANGER, 0.25))
         self._signal_dot.setStyleSheet(f"color: {color}; font-size: 16px;")
 
     # ── performance mode ──────────────────────────────────────────────────────
