@@ -14,8 +14,14 @@ from ui.fonts import mono_font
 from ui import theme
 from typing import List, Optional, Tuple, Dict
 
-C_PAST_BG    = QColor(50, 50, 50)
 C_FUTURE_BG  = QColor(38, 38, 38)
+# Past rows: a hair-thin 3 % white lift over the future-row bg.
+# Pre-computed from _color_blend(C_FUTURE_BG, white, 0.03) so it can
+# live at module level without a forward reference.  The visual
+# delta from C_FUTURE_BG is intentionally tiny — past cues are
+# differentiated mainly by dim text and unbold weight, not by a
+# loud background change like the previous #323232.
+C_PAST_BG    = QColor(44, 44, 44)
 # Section dividers were previously a warm amber (BG #231E14, text
 # #C8B97A) — visually distinct but clashed with cue tags that landed
 # in the same warm-tone family.  Move to neutral grey from the
@@ -24,7 +30,6 @@ C_FUTURE_BG  = QColor(38, 38, 38)
 C_SECTION_BG    = QColor(theme.SECTION_BG)
 C_SECTION_TEXT  = QColor(theme.SECTION_TEXT)
 C_SECTION_COUNT = QColor(theme.SECTION_COUNT_TEXT)
-C_TEXT_DIM   = QColor(165, 165, 165)
 C_TEXT_NORM  = QColor(220, 220, 220)
 C_TC_ERROR   = QColor(110, 35, 35)
 C_DUPLICATE  = QColor(140, 100, 20)
@@ -621,7 +626,7 @@ class CueTable(QTableWidget):
                     _bold(item, False)
                 elif is_past:
                     item.setBackground(QBrush(C_PAST_BG))
-                    item.setForeground(QBrush(C_TEXT_DIM))
+                    item.setForeground(QBrush(QColor(theme.TEXT_MUTED)))
                     _bold(item, False)
                 else:
                     # Cue-colour rows now read as "tagged with this hue"
