@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QFrame, QStackedWidget, QDialog, QSplitter,
 )
 
-from cue_engine import CueEngine, CueParseError
+from cue_engine import CueEngine, CueParseError, find_duplicate_rows
 from ltc_decoder import LTCDecoder, LTCLibError
 from show_file import ShowFile, ShowSettings
 from ui.cue_table import CueTable, CueEditToolbar, OperatorEditPanel
@@ -796,80 +796,204 @@ class MainWindow(QMainWindow):
 
     def _build_pdf_html(self, include_notes: bool = True,
                         page_break_per_section: bool = False) -> str:
-        operator_names = list(self._show_settings.operator_names or [])
-        show_name = self._current_show_title()
-        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cue_count = sum(1 for c in self._engine.cues if not c.is_divider)
-        n_cols = 4 if include_notes else 3
+        """
+        Builds the master cue-list document body.  The header band on
+        page 1 and the footer band on every page are painted on top
+        of this document by _export_pdf via QPainter overlays
+        (P5b / P5c) — what's emitted here is the table itself plus
+        a placeholder div at the top reserving space for the header
+        + subheader bar.
 
-        rows = []
-        seen_section = False
-        for cue in self._engine.cues:
+        Notes column renders each operator's name in their resolved
+        semantic colour (override > theme alias > stable cycle) so
+        the cue sheet on paper uses the same palette the operator
+        sees on screen.
+        """
+        operator_names = list(self._show_settings.operator_names or [])
+        operator_colors = self._show_settings.operator_colors or {}
+
+        def op_color(name: str) -> str:
+            return (operator_colors.get(name)
+                    or theme.operator_color(name, tuple(operator_names)))
+
+        cues = self._engine.cues
+        dup_rows = find_duplicate_rows(cues)
+        section_count = sum(1 for c in cues if c.is_divider)
+        cue_count     = sum(1 for c in cues if not c.is_divider)
+        dup_count     = len(dup_rows)
+
+        n_cols = 4 if include_notes else 3
+        # Spec column widths.  When notes are off, the freed 40 %
+        # gets distributed by lifting Description (which is the
+        # variable-length narrative column).
+        if include_notes:
+            col_widths = ("14%", "16%", "30%", "40%")
+        else:
+            col_widths = ("16%", "22%", "62%")
+
+        # Subheader summary — duplicate count uses the warning amber
+        # only when there are any duplicates (else neutral dark grey
+        # like the other numbers).
+        dup_color = "#b45309" if dup_count else "#333"
+        dup_count_html = (
+            f"<span style=\"color:{dup_color}; font-weight:500;\">{dup_count}</span>"
+        )
+
+        # Build table rows.
+        body_rows: List[str] = []
+        alt = False
+        for row_idx, cue in enumerate(cues):
             if cue.is_divider:
-                # Page break before EVERY section except the first one
-                # (otherwise the cover page is just an empty header).
-                br_style = ""
-                if page_break_per_section and seen_section:
-                    br_style = " style=\"page-break-before: always;\""
-                seen_section = True
-                rows.append(
-                    f"<tr class='section'{br_style}>"
-                    f"<td colspan='{n_cols}'>{html.escape(cue.name or 'SECTION')}</td>"
-                    "</tr>"
+                # Section bg = explicit override or the spec default.
+                bg = (cue.section_color or "").strip() or "#1a1a2a"
+                br = ""
+                if page_break_per_section and any(
+                    not c.is_divider for c in cues[:row_idx]
+                ):
+                    br = " page-break-before: always;"
+                body_rows.append(
+                    f"<tr class='section'>"
+                    f"<td colspan='{n_cols}' "
+                    f"style=\"background:{html.escape(bg)};{br}\">"
+                    f"{html.escape(cue.name or 'SECTION')}"
+                    f"</td></tr>"
                 )
+                # Section row resets the alternating zebra so the
+                # first cue under a section always starts white.
+                alt = False
                 continue
 
-            notes_html = ""
+            is_dup = row_idx in dup_rows
+
+            # Row background: duplicate wash overrides the alternating
+            # zebra so the dup signal is consistent regardless of row
+            # parity.
+            if is_dup:
+                row_bg = "#fffcf0"
+            else:
+                row_bg = "#fafaf8" if alt else "#ffffff"
+            alt = not alt
+
+            # Timecode cell.  Duplicate rows get a 3-px amber left
+            # border (rendered in pt for QTextDocument), the timecode
+            # text in #92620a, and a small "duplicate TC" badge below
+            # the time.
+            tc_color = "#92620a" if is_dup else "#555"
+            tc_border = (
+                "border-left: 3pt solid #e8a020; padding-left: 8pt;"
+                if is_dup else ""
+            )
+            tc_inner = html.escape(cue.timecode or "")
+            if is_dup:
+                tc_inner += (
+                    "<div style=\""
+                    "display: inline-block; margin-top: 3pt; "
+                    "background: #fef3c7; color: #92620a; "
+                    "border: 0.5pt solid #f59e0b; "
+                    "font-size: 7.5pt; font-weight: 700; "
+                    "letter-spacing: 0.4pt; "
+                    "padding: 1pt 4pt;"
+                    "\">duplicate TC</div>"
+                )
+
+            tc_cell = (
+                f"<td class='tc' style=\"color:{tc_color};{tc_border}\">"
+                f"{tc_inner}"
+                f"</td>"
+            )
+
+            # Name cell.
+            name_cell = (
+                f"<td class='cue-name'>{html.escape(cue.name or '')}</td>"
+            )
+
+            # Description cell — italicised "no description" placeholder
+            # when the field is empty so empty rows still read as
+            # intentional, not broken.
+            desc = (cue.description or "").strip()
+            if desc:
+                desc_html = html.escape(desc).replace(chr(10), "<br>")
+                desc_cell = f"<td class='cue-desc'>{desc_html}</td>"
+            else:
+                desc_cell = (
+                    "<td class='cue-desc' "
+                    "style=\"color:#999; font-style:italic;\">"
+                    "no description</td>"
+                )
+
+            # Notes cell — one mini-row per operator with a comment.
+            # Empty stays empty (no em-dash).
+            cells = tc_cell + name_cell + desc_cell
             if include_notes:
-                notes_parts = []
+                note_lines = []
                 for op_name in operator_names:
                     comment = cue.operator_comments.get(op_name, "")
-                    if comment:
-                        notes_parts.append(
-                            f"<div class='note'>"
-                            f"<span class='note-name'>{html.escape(op_name)}</span> "
-                            f"{html.escape(comment).replace(chr(10), '<br>')}"
-                            f"</div>"
-                        )
-                notes_html = "".join(notes_parts) or "<span class='muted'>—</span>"
-
-            color_name = (cue.color or "").strip()
-            color_hex = _pdf_color_hex(color_name) if color_name else ""
-            tint_hex = _pdf_color_tint(color_name) if color_name else ""
-
-            tc_style = ""
-            if color_hex:
-                tc_style = f" style=\"border-left: 6pt solid {html.escape(color_hex)};\""
-
-            row_class = "cue"
-            row_style = ""
-            if tint_hex:
-                # Tint every cell of the row, not just <tr> background, so
-                # QTextDocument's HTML renderer actually applies it.
-                row_style = f" style=\"background:{html.escape(tint_hex)};\""
-
-            cells = (
-                f"<td class='tc'{tc_style}>{html.escape(cue.timecode or '')}</td>"
-                f"<td class='cue-name'>{html.escape(cue.name or '')}</td>"
-                f"<td class='cue-desc'>{html.escape(cue.description or '')}</td>"
-            )
-            if include_notes:
-                cells += f"<td class='cue-notes'>{notes_html}</td>"
-            rows.append(f"<tr class='{row_class}'{row_style}>{cells}</tr>")
-
-        if not rows:
-            rows.append(
-                f"<tr><td colspan='{n_cols}' class='empty'>No cues in show.</td></tr>"
+                    if not comment:
+                        continue
+                    color = op_color(op_name)
+                    safe_name = html.escape(op_name).upper()
+                    safe_comment = html.escape(comment).replace(chr(10), "<br>")
+                    # QTextDocument's HTML doesn't honour grid/flex,
+                    # so each note is a small two-cell sub-table —
+                    # label fixed-width, text wrapping freely.
+                    note_lines.append(
+                        f"<table style=\"width:100%; border-collapse:collapse; "
+                        f"margin-bottom: 3pt;\"><tr>"
+                        f"<td style=\"width:52pt; vertical-align:top; "
+                        f"padding:1pt 6pt 0 0; "
+                        f"font-size:7.5pt; font-weight:700; color:{color}; "
+                        f"letter-spacing:0.4pt; white-space:nowrap;\">"
+                        f"{safe_name}</td>"
+                        f"<td style=\"vertical-align:top; "
+                        f"font-size:10pt; color:#2a2a2a; line-height:1.5;\">"
+                        f"{safe_comment}</td>"
+                        f"</tr></table>"
+                    )
+                cells += f"<td class='cue-notes'>{''.join(note_lines)}</td>"
+            body_rows.append(
+                f"<tr class='cue' style=\"background:{row_bg};\">{cells}</tr>"
             )
 
-        # Logo: referenced as a Qt resource named "logo" — _export_pdf
-        # registers the actual QImage on the QTextDocument before printing.
-        logo_html = ""
-        if self._show_settings.logo_path and os.path.exists(self._show_settings.logo_path):
-            logo_html = "<img src='logo' class='logo' />"
+        if not body_rows:
+            body_rows.append(
+                f"<tr><td colspan='{n_cols}' class='empty'>"
+                "No cues in show.</td></tr>"
+            )
 
-        # Landscape A4 — printer.setPageOrientation handles paper size.
-        # Body margin = 0; printer.setPageMargins() handles paper margins.
+        # Width column widths emitted as <colgroup> so QTextDocument
+        # actually honours them with table-layout: fixed.
+        colgroup = "<colgroup>" + "".join(
+            f"<col style=\"width:{w};\">" for w in col_widths
+        ) + "</colgroup>"
+
+        # Subheader counts strip — page numbers come in via the
+        # painter overlay (P5c).
+        subheader_html = (
+            "<table style=\"width:100%; background:#f5f2ed; "
+            "border-bottom: 0.5pt solid #e0d8cf; "
+            "border-collapse:collapse; margin-bottom:8pt;\"><tr>"
+            "<td style=\"padding:7pt 0; font-size:9.5pt; color:#888;\">"
+            f"Sections <span style=\"color:#333; font-weight:500;\">{section_count}</span>"
+            f" &nbsp;·&nbsp; Total cues <span style=\"color:#333; font-weight:500;\">{cue_count}</span>"
+            f" &nbsp;·&nbsp; Duplicate timecodes {dup_count_html}"
+            "</td>"
+            "</tr></table>"
+        )
+
+        # Header band — placeholder block at the top of the doc.
+        # P5c will paint the proper black header on top; for now
+        # the doc just leaves the space empty so a P4-only export
+        # still looks coherent.  Height matches the spec's header
+        # padding (~52pt = 14 + 36 logo + 14 - 12 for the existing
+        # margin-bottom).
+        header_placeholder = (
+            "<div style=\"height:52pt; background:#0d0d0d; "
+            "color:#ffffff; font-family:Helvetica,Arial,sans-serif; "
+            "padding:14pt 24pt; font-size:11pt;\">"
+            f"{html.escape(self._current_show_title())} — Master Cue List"
+            "</div>"
+        )
+
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -878,48 +1002,9 @@ class MainWindow(QMainWindow):
 body {{
     font-family: Helvetica, Arial, sans-serif;
     color: #1a1a1a;
-    font-size: 11pt;
-    margin: 0;
-    padding: 0;
-}}
-.header {{
-    border-bottom: 2pt solid #1f2233;
-    padding-bottom: 12pt;
-    margin-bottom: 16pt;
-}}
-.header-row {{
-    width: 100%;
-    border-collapse: collapse;
-}}
-.header-row td {{
-    vertical-align: middle;
-    padding: 0;
-    border: 0;
-}}
-.logo {{
-    height: 56pt;
-}}
-.title-cell {{
-    padding-left: 14pt;
-}}
-h1 {{
-    font-size: 26pt;
-    margin: 0;
-    font-weight: 700;
-    letter-spacing: -0.5pt;
-    color: #0a0a0a;
-}}
-.subtitle {{
-    color: #6a6a6a;
     font-size: 10pt;
-    margin-top: 2pt;
-    letter-spacing: 0.4pt;
-}}
-.meta-cell {{
-    text-align: right;
-    color: #555;
-    font-size: 9pt;
-    line-height: 1.5;
+    margin: 0;
+    padding: 0;
 }}
 table.cues {{
     width: 100%;
@@ -927,67 +1012,55 @@ table.cues {{
     table-layout: fixed;
 }}
 table.cues th {{
-    background: #20232f;
-    color: #f0f1f5;
-    font-size: 9pt;
+    background: #1a1a1a;
+    color: #c0c0c0;
+    font-size: 8.5pt;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1.2pt;
+    letter-spacing: 1pt;
     text-align: left;
-    padding: 9pt 10pt;
+    padding: 6pt 10pt;
     border: 0;
 }}
 table.cues td {{
-    padding: 11pt 10pt;
+    padding: 7pt 10pt;
     text-align: left;
     vertical-align: top;
     word-wrap: break-word;
-    border-bottom: 1px solid #d8dce5;
+    border-bottom: 0.5pt solid #eeebe6;
     line-height: 1.45;
 }}
 tr.cue {{
     page-break-inside: avoid;
 }}
-.tc {{
-    white-space: nowrap;
-    font-family: Menlo, Courier, monospace;
-    font-weight: 700;
-    font-size: 11pt;
-    color: #0a0a0a;
-}}
-.cue-name {{
-    font-weight: 700;
-    color: #0a0a0a;
-    font-size: 11.5pt;
-}}
-.cue-desc {{
-    color: #3a3a3a;
-}}
-.cue-notes {{
-    color: #1a1a1a;
-}}
-.section td {{
-    background: #1f2233;
-    color: #ffffff;
+tr.section td {{
+    color: #d8d8d8;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1.4pt;
-    padding: 10pt 14pt;
+    letter-spacing: 1.6pt;
+    padding: 5pt 14pt;
     border: 0;
-    font-size: 10pt;
+    font-size: 9pt;
     page-break-after: avoid;
 }}
-.note {{
-    margin: 0 0 6pt 0;
+.tc {{
+    white-space: nowrap;
+    font-family: Courier, monospace;
+    font-size: 10pt;
 }}
-.note:last-child {{ margin-bottom: 0; }}
-.note-name {{
-    font-weight: 700;
-    color: #4d3fa0;
-    font-size: 9pt;
-    text-transform: uppercase;
-    letter-spacing: 0.6pt;
+.cue-name {{
+    font-size: 10.5pt;
+    font-weight: 500;
+    color: #1a1a1a;
 }}
-.muted {{ color: #999; }}
+.cue-desc {{
+    font-size: 10pt;
+    color: #666;
+    line-height: 1.55;
+}}
+.cue-notes {{
+    color: #2a2a2a;
+}}
 .empty {{
     color: #777;
     text-align: center;
@@ -997,35 +1070,20 @@ tr.cue {{
 </style>
 </head>
 <body>
-<div class="header">
-<table class="header-row"><tr>
-<td style="width:80pt;">{logo_html}</td>
-<td class="title-cell">
-<h1>{html.escape(show_name)}</h1>
-<div class="subtitle">CUE SHEET · {cue_count} cue{'s' if cue_count != 1 else ''} · {len(operator_names)} operator{'s' if len(operator_names) != 1 else ''}</div>
-</td>
-<td class="meta-cell">
-Generated {html.escape(generated_at)}<br>
-{html.escape(APP_NAME)} {html.escape(VERSION)}
-</td>
-</tr></table>
-</div>
+{header_placeholder}
+{subheader_html}
 <table class="cues">
+{colgroup}
 <thead>
-{('<tr>'
-  '<th style="width: 12%;">Timecode</th>'
-  '<th style="width: 20%;">Cue</th>'
-  '<th style="width: 28%;">Description</th>'
-  '<th style="width: 40%;">Operator Notes</th>'
-  '</tr>') if include_notes else
- ('<tr>'
-  '<th style="width: 16%;">Timecode</th>'
-  '<th style="width: 28%;">Cue</th>'
-  '<th style="width: 56%;">Description</th>'
-  '</tr>')}
+<tr>
+<th>Timecode</th>
+<th>Cue</th>
+<th>Description</th>
+{('<th>Operator Notes</th>' if include_notes else '')}
+</tr>
 </thead>
 <tbody>
-{''.join(rows)}
+{''.join(body_rows)}
 </tbody>
 </table>
 </body>
