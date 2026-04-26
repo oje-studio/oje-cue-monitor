@@ -14,7 +14,6 @@ from ui.fonts import mono_font
 from ui import theme
 from typing import List, Optional, Tuple, Dict
 
-C_CURRENT    = QColor(55, 130, 55)
 C_PAST_BG    = QColor(50, 50, 50)
 C_FUTURE_BG  = QColor(38, 38, 38)
 # Section dividers were previously a warm amber (BG #231E14, text
@@ -257,6 +256,39 @@ class TimecodeDelegate(QStyledItemDelegate):
         return None
 
 
+# ── Active-row stripe delegate ───────────────────────────────────────────────
+
+class ActiveRowDelegate(QStyledItemDelegate):
+    """
+    Lays a 3-px green stripe down the left edge of the active cue's
+    row.  Installed only on column 0 (#) — a stripe at the left of the
+    leftmost cell reads as "the row's left border" because col 0
+    butts up against the table's left edge.
+
+    The tint and bold come from _apply_styles_inner; this delegate
+    only adds the visible border, so a stale active state still looks
+    sensible if the painter runs first.
+    """
+
+    STRIPE_WIDTH = 3
+
+    def __init__(self, table: "CueTable", parent=None):
+        super().__init__(parent)
+        self._table = table
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        super().paint(painter, option, index)
+        if index.row() == self._table._active_row:
+            painter.save()
+            painter.setBrush(QBrush(QColor(theme.SEMANTIC_SUCCESS)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRect(
+                option.rect.x(), option.rect.y(),
+                self.STRIPE_WIDTH, option.rect.height(),
+            )
+            painter.restore()
+
+
 # ── CueTable ─────────────────────────────────────────────────────────────────
 
 class CueTable(QTableWidget):
@@ -277,6 +309,7 @@ class CueTable(QTableWidget):
         self._duplicate_rows: set = set()
         self._highlighted_siblings: List[int] = []
         self._section_counts: Dict[int, int] = {}
+        self._active_row: int = -1
 
         self.setHorizontalHeaderLabels(COLUMNS)
         hh = self.horizontalHeader()
@@ -319,6 +352,7 @@ class CueTable(QTableWidget):
             }
         """)
 
+        self.setItemDelegateForColumn(0, ActiveRowDelegate(self, self))
         self.setItemDelegateForColumn(1, TimecodeDelegate(self, self))
         self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
         # Hidden by default — set_edit_mode(True) reveals it when
@@ -510,6 +544,18 @@ class CueTable(QTableWidget):
             self.blockSignals(False)
 
     def _apply_styles_inner(self, cues: List[Cue], current_cue: Optional[Cue], current_frames: int):
+        prev_active = self._active_row
+        if current_cue is not None and 1 <= current_cue.index <= len(cues):
+            self._active_row = current_cue.index - 1
+        else:
+            self._active_row = -1
+        # Repaint col 0 of the previous active row so its green stripe
+        # disappears when the current cue advances.  setBackground on
+        # the new active row covers the new stripe automatically; only
+        # the *outgoing* row needs an explicit nudge.
+        if prev_active != self._active_row and prev_active >= 0:
+            idx = self.model().index(prev_active, 0)
+            self.update(idx)
         for row, cue in enumerate(cues):
             if cue.is_divider:
                 collapsed = row in self._collapsed_groups
@@ -551,8 +597,19 @@ class CueTable(QTableWidget):
                 if not item:
                     continue
                 if is_current:
-                    item.setBackground(QBrush(custom_bg if custom_bg else C_CURRENT))
-                    item.setForeground(QBrush(C_TEXT_NORM))
+                    # Active cue is always green tint regardless of any
+                    # cue-colour tag — the green carries the "this is
+                    # live" semantic, and the cue colour reverts to a
+                    # decorative tag (still visible in the COL_COLOR
+                    # swatch and its 7 % row tint when not active).
+                    # The stripe at the row's left edge is painted by
+                    # ActiveRowDelegate on col 0.
+                    item.setBackground(
+                        QBrush(_color_blend(C_FUTURE_BG,
+                                            QColor(theme.SEMANTIC_SUCCESS),
+                                            0.14))
+                    )
+                    item.setForeground(QBrush(QColor(theme.TEXT_BRIGHT)))
                     _bold(item, True)
                 elif is_dup_hl:
                     item.setBackground(QBrush(C_DUP_HIGHLIGHT))
