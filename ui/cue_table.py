@@ -530,7 +530,18 @@ class CueTable(QTableWidget):
                     item.setForeground(QBrush(C_TEXT_DIM))
                     _bold(item, False)
                 else:
-                    item.setBackground(QBrush(custom_bg.darker(200) if custom_bg else C_FUTURE_BG))
+                    # Cue-colour rows now read as "tagged with this hue"
+                    # rather than "filled with this hue" — a 7 % blend
+                    # over the standard future-row background lifts the
+                    # tone enough to spot at a glance without making the
+                    # name text fight the colour for legibility.  Old
+                    # behaviour (full dark shade) flooded the row and
+                    # made every coloured cue look more important than
+                    # the white-text default cue.
+                    if custom_bg:
+                        item.setBackground(QBrush(_color_blend(C_FUTURE_BG, custom_bg, 0.07)))
+                    else:
+                        item.setBackground(QBrush(C_FUTURE_BG))
                     item.setForeground(QBrush(C_TEXT_NORM))
                     _bold(item, False)
 
@@ -720,6 +731,21 @@ def _bold(item: QTableWidgetItem, bold: bool):
     if f.bold() != bold:
         f.setBold(bold)
         item.setFont(f)
+
+
+def _color_blend(base: QColor, accent: QColor, alpha: float) -> QColor:
+    """
+    Return `base` overlaid with `accent` at `alpha` (0..1).  Qt's
+    QColor has no built-in blend op, so we mix the two RGB triples
+    manually.  Used for the subtle cue-colour row tint — at 0.07
+    the row reads as "vaguely tinted toward this colour" rather
+    than "this colour, dimmed".
+    """
+    inv = 1.0 - alpha
+    r = int(round(base.red()   * inv + accent.red()   * alpha))
+    g = int(round(base.green() * inv + accent.green() * alpha))
+    b = int(round(base.blue()  * inv + accent.blue()  * alpha))
+    return QColor(r, g, b)
 
 
 class _OperatorCommentEdit(QPlainTextEdit):
