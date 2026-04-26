@@ -327,39 +327,35 @@ body {{
     flex-wrap: nowrap;
     min-height: 54px;
     overflow: hidden;
+    /* Single rule for every text item in the bar — same font, weight,
+       size and letter-spacing across TC / FPS / state / dB / clock so
+       the row looks rhythmic instead of mismatched. Each item still
+       has its own colour via its specific class below. */
+    font-family: 'Menlo', 'SF Mono', 'Courier New', monospace;
+    font-size: clamp(16px, 4vw, 22px);
+    font-weight: 800;
+    letter-spacing: 0.5px;
 }}
+.statusbar > * {{ white-space: nowrap; }}
 .statusbar .dot {{
     color: #d75a5a;
-    font-size: 18px;
     line-height: 1;
 }}
 .statusbar .dot.ok {{ color: #4bc373; }}
 .statusbar .tc {{
-    font-family: 'Menlo', 'SF Mono', 'Courier New', monospace;
-    font-size: clamp(22px, 5.5vw, 30px);
-    font-weight: 800;
     color: #f0f0f0;
-    letter-spacing: 0.5px;
+    /* Reserve max width for HH:MM:SS:FF so the bar doesn't reflow when
+       the value goes from "--" to "10:00:00:00". */
     min-width: 9.5ch;
     text-align: center;
 }}
-.statusbar .meta {{
-    font-family: 'Menlo', 'SF Mono', monospace;
-    font-size: clamp(13px, 2.8vw, 15px);
-    font-weight: 800;
-    color: #858585;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-}}
+.statusbar .meta {{ color: #858585; }}
 .statusbar .clock {{
-    font-family: 'Menlo', 'SF Mono', monospace;
-    font-size: clamp(18px, 4vw, 24px);
-    font-weight: 800;
     color: #dcdcdc;
     min-width: 8ch;
     text-align: center;
 }}
-.statusbar .sep {{ color: #3d3d3d; font-size: 16px; }}
+.statusbar .sep {{ color: #3d3d3d; }}
 
 /* ── 5-bar VU meter (CSS only, mirrors the Mac one) ─────────────────────── */
 .vu {{
@@ -634,16 +630,16 @@ body {{
     .statusbar {{
         padding: 8px 10px;
         gap: 6px;
-        min-height: 40px;
+        min-height: 44px;
+        font-size: 14px;     /* uniform shrink for every text item */
     }}
     .statusbar .sep,
     .statusbar #fps,
     .statusbar #signal-db {{
         display: none;       /* keep TC + state + VU + clock — drop FPS, dB text, separators */
     }}
-    .statusbar .tc {{ font-size: 20px; min-width: 0; }}
-    .statusbar .clock {{ font-size: 14px; min-width: 0; }}
-    .statusbar .meta {{ font-size: 11px; }}
+    .statusbar .tc {{ min-width: 0; }}
+    .statusbar .clock {{ min-width: 0; }}
     .vu {{ height: 14px; gap: 1px; }}
     .vu .bar {{ width: 7px; }}
     .access-pill {{
