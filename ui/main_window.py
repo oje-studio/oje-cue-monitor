@@ -111,18 +111,20 @@ class CueCard(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.Box)
         self.setStyleSheet(
-            f"CueCard {{ background: {DARK_PANEL.name()}; "
-            f"border: 1px solid {DARK_BORDER.name()}; border-radius: 6px; }}"
+            f"CueCard {{ background: {theme.BG_SURFACE}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_LG}px; }}"
         )
         self._countdown_enabled = True
         self._operator_names: list = []
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 10, 12, 10)
-        lay.setSpacing(4)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
 
         tl = QLabel(title.upper())
         tl.setStyleSheet(
-            f"color: {TEXT_DIM.name()}; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+            f"color: {theme.TEXT_DIM}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 1.5px;"
         )
         lay.addWidget(tl)
 
@@ -130,11 +132,11 @@ class CueCard(QFrame):
         fn = QFont(); fn.setPointSize(20); fn.setBold(True)
         self.name_lbl.setFont(fn)
         self.name_lbl.setWordWrap(True)
-        self.name_lbl.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
+        self.name_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         lay.addWidget(self.name_lbl)
 
         self.desc_lbl = QLabel("")
-        self.desc_lbl.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 13px;")
+        self.desc_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 13px;")
         self.desc_lbl.setWordWrap(True)
         lay.addWidget(self.desc_lbl)
 
@@ -167,7 +169,11 @@ class CueCard(QFrame):
         self.desc_lbl.setText(cue.description)
         if countdown is not None and self._countdown_enabled:
             m, s  = divmod(int(countdown), 60)
-            color = ACCENT_RED.name() if countdown < 10 else TEXT_BRIGHT.name()
+            # Sub-10-second countdown flips to the danger hue so the
+            # operator's eye snaps to the upcoming GO without needing
+            # a separate flashing indicator.
+            color = (theme.SEMANTIC_DANGER if countdown < 10
+                     else theme.TEXT_BRIGHT)
             self.cd_lbl.setText(f"in {m:02d}:{s:02d}")
             self.cd_lbl.setStyleSheet(f"color: {color}; font-size: 16px;")
         else:
