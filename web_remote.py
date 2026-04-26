@@ -449,9 +449,12 @@ body {{
     grid-template-columns: 1fr auto;
     column-gap: 16px;
     align-items: center;
-    /* Reserve a stable height — empty next still keeps the strip there
-       so the main area doesn't grow when the show ends. */
+    /* Reserve a stable height (so the main area doesn't grow when the
+       show ends) AND cap it (so unusually long content can never push
+       its own tail under iOS Safari's bottom chrome). */
     min-height: 78px;
+    max-height: 30vh;
+    overflow: hidden;
 }}
 .next-info {{ min-width: 0; }}
 .next-tag {{
@@ -646,6 +649,11 @@ body {{
         padding: 10px 14px;
         min-height: 60px;
     }}
+    /* On phones, hide the next-cue operator notes — they push the
+       strip beyond the bottom safe area when several operators have
+       long comments. The operator looks at notes for the *current*
+       cue; for "next" the name + countdown is enough preview. */
+    .next-ops {{ display: none; }}
     .operators {{
         grid-template-columns: 1fr;     /* one card per row on phone */
     }}
