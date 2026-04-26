@@ -7,13 +7,54 @@ from PyQt6.QtWidgets import (
     QPushButton, QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPixmap, QColor
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 
 from show_file import ShowSettings
 from ui.fonts import mono_font, sans_font
+from ui import theme
 
 APP_NAME  = "ØJE CUE MONITOR"
 COPYRIGHT = "© 2026 ØJE Studio"
+
+
+class _PerfVUMeter(QWidget):
+    """5-bar LED-style level meter for the Performance status bar.
+    Matches the meter in the main edit window so the operator sees the
+    same shape on both screens.
+    """
+    BARS = 5
+    _GREEN  = QColor(75, 195, 115)
+    _AMBER  = QColor(225, 135, 48)
+    _RED    = QColor(215, 75, 75)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._db = -120.0
+        self.setFixedSize(72, 22)
+
+    def set_db(self, db: float):
+        self._db = db
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        W, H = self.width(), self.height()
+        bw = (W - (self.BARS - 1) * 2) // self.BARS
+        # Map -60..0 dBFS onto 0..BARS so the rightmost bar lights only
+        # near clipping. Anything quieter than -60 dB is dark.
+        norm = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
+        lit = int(norm * self.BARS)
+        for i in range(self.BARS):
+            x = i * (bw + 2)
+            if i >= self.BARS - 1:
+                c = self._RED if i < lit else QColor(60, 20, 20)
+            elif i >= self.BARS - 2:
+                c = self._AMBER if i < lit else QColor(55, 40, 15)
+            else:
+                c = self._GREEN if i < lit else QColor(25, 55, 35)
+            p.fillRect(x, 2, bw, H - 4, c)
+        p.end()
+
 
 _CUE_COLORS = {
     "red": "#af3030",
@@ -68,54 +109,67 @@ class PerformanceView(QWidget):
         # ── Status bar ───────────────────────────────────────────────────────
         time_bar = QWidget()
         time_bar.setFixedHeight(54)
-        time_bar.setStyleSheet("background: #0a0a0a;")
+        time_bar.setStyleSheet(f"background: {theme.BG_HEADER};")
         tb_lay = QHBoxLayout(time_bar)
         tb_lay.setContentsMargins(24, 0, 24, 0)
         tb_lay.setSpacing(10)
 
+        # One stylesheet string for every middot — keeps the
+        # vocabulary identical with the main window header (C2)
+        # and the web remote (a3 / E1).
+        sep_qss = f"color: {theme.TEXT_DIM}; font-size: 22px;"
+
         self._signal_dot_lbl = QLabel("●")
-        self._signal_dot_lbl.setStyleSheet("color: #d75a5a; font-size: 18px;")
+        self._signal_dot_lbl.setStyleSheet(
+            f"color: {theme.SEMANTIC_DANGER}; font-size: 18px;"
+        )
         tb_lay.addStretch()
         tb_lay.addWidget(self._signal_dot_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._tc_header_lbl = QLabel("--:--:--:--")
         self._tc_header_lbl.setFont(mono_font(24, bold=True))
-        self._tc_header_lbl.setStyleSheet("color: #f0f0f0;")
+        self._tc_header_lbl.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         tb_lay.addWidget(self._tc_header_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_1 = QLabel("|")
-        self._sep_1.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_1 = QLabel("·")
+        self._sep_1.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_1, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._fps_lbl = QLabel("FPS 25.00")
         self._fps_lbl.setFont(mono_font(15, bold=True))
-        self._fps_lbl.setStyleSheet("color: #858585;")
+        self._fps_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         tb_lay.addWidget(self._fps_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_2 = QLabel("|")
-        self._sep_2.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_2 = QLabel("·")
+        self._sep_2.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_2, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._signal_state_lbl = QLabel("NO SIGNAL")
         self._signal_state_lbl.setFont(mono_font(15, bold=True))
+        # Initial colour set by update_signal_state — leave unset here
+        # so a fresh PerformanceView doesn't flash an unrelated colour.
         tb_lay.addWidget(self._signal_state_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_level = QLabel("|")
-        self._sep_level.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_level = QLabel("·")
+        self._sep_level.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_level, alignment=Qt.AlignmentFlag.AlignVCenter)
 
+        # Visual VU meter — same style as the meter in the main edit window.
+        self._vu = _PerfVUMeter()
+        tb_lay.addWidget(self._vu, alignment=Qt.AlignmentFlag.AlignVCenter)
+
         self._signal_level_lbl = QLabel("−∞ dB")
-        self._signal_level_lbl.setFont(mono_font(15, bold=True))
-        self._signal_level_lbl.setStyleSheet("color: #7a7a7a;")
+        self._signal_level_lbl.setFont(mono_font(13, bold=True))
+        self._signal_level_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         tb_lay.addWidget(self._signal_level_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_3 = QLabel("|")
-        self._sep_3.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_3 = QLabel("·")
+        self._sep_3.setStyleSheet(sep_qss)
         tb_lay.addWidget(self._sep_3, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._clock_lbl = QLabel("")
         self._clock_lbl.setFont(mono_font(24, bold=True))
-        self._clock_lbl.setStyleSheet("color: #dcdcdc;")
+        self._clock_lbl.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         tb_lay.addWidget(self._clock_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
         tb_lay.addStretch()
 
@@ -189,22 +243,32 @@ class PerformanceView(QWidget):
         root.addWidget(div)
 
         # ── Next cue (35%) ───────────────────────────────────────────────────
+        # Slightly lighter than the current-cue band above (a-hair-of
+        # surface, not pure black) so the boundary between CURRENT and
+        # UP NEXT reads even on a slightly mis-calibrated stage
+        # monitor.  Same overall vocabulary as the rest of the dark
+        # UI — no longer a #050505 one-off.
         next_w = QWidget()
-        next_w.setStyleSheet("background: #050505;")
+        next_w.setStyleSheet(f"background: {theme.BG_APP};")
         next_lay = QVBoxLayout(next_w)
         next_lay.setContentsMargins(64, 16, 64, 16)
         next_lay.setSpacing(6)
 
         nr = QHBoxLayout()
-        self._next_tag = QLabel("NEXT")
+        # "UP NEXT" reads more conversationally than the bare "NEXT"
+        # tag the operator scans past.  Lifted from theme.TEXT_DIM so
+        # it's visible without competing for attention.
+        self._next_tag = QLabel("UP NEXT")
         self._next_tag.setStyleSheet(
-            "color: #3a3a3a; font-size: 11px; font-weight: bold; letter-spacing: 3px;"
+            f"color: {theme.TEXT_DIM}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 3px;"
         )
         nr.addWidget(self._next_tag)
 
         self._next_group = QLabel("")
         self._next_group.setStyleSheet(
-            "color: #4a4a7a; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+            f"color: {theme.SEMANTIC_INFO}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 1px;"
         )
         nr.addWidget(self._next_group)
         nr.addStretch()
@@ -212,7 +276,7 @@ class PerformanceView(QWidget):
         self._countdown_lbl = QLabel("")
         self._f_countdown = mono_font(36, bold=True)
         self._countdown_lbl.setFont(self._f_countdown)
-        self._countdown_lbl.setStyleSheet("color: #ffffff;")
+        self._countdown_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         nr.addWidget(self._countdown_lbl)
 
         next_lay.addLayout(nr)
@@ -222,7 +286,7 @@ class PerformanceView(QWidget):
         self._f_next_name.setPointSize(30)
         self._f_next_name.setBold(True)
         self._next_name.setFont(self._f_next_name)
-        self._next_name.setStyleSheet("color: #cccccc;")
+        self._next_name.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         self._next_name.setWordWrap(True)
         next_lay.addWidget(self._next_name)
 
@@ -230,7 +294,7 @@ class PerformanceView(QWidget):
         self._f_next_desc = QFont()
         self._f_next_desc.setPointSize(16)
         self._next_desc.setFont(self._f_next_desc)
-        self._next_desc.setStyleSheet("color: #555555;")
+        self._next_desc.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         self._next_desc.setWordWrap(True)
         next_lay.addWidget(self._next_desc)
 
@@ -248,21 +312,52 @@ class PerformanceView(QWidget):
         # ── Floating overlays ─────────────────────────────────────────────────
         self._tc_overlay = QLabel("--:--:--:--", self)
         self._tc_overlay.setFont(mono_font(13))
-        self._tc_overlay.setStyleSheet("color: #2a2a2a; background: transparent;")
+        # Deliberately dim — a subtle floating reminder of the show
+        # TC, not a primary readout (the big TC lives in the status
+        # bar at the top).  TEXT_DISABLED keeps it whisper-quiet.
+        self._tc_overlay.setStyleSheet(
+            f"color: {theme.TEXT_DISABLED}; background: transparent;"
+        )
         self._tc_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._tc_overlay.hide()
 
         self._esc_hint = QLabel("Esc  —  exit performance mode", self)
-        self._esc_hint.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
+        # Two states: bright on mouse activity (and right after entering
+        # the view), then fades to a barely-visible dim state ~3 s later
+        # so it stays out of the operator's way during the show.
+        self._ESC_HINT_BRIGHT = (
+            f"color: {theme.TEXT_MUTED}; font-size: 12px; background: transparent;"
+        )
+        self._ESC_HINT_DIM    = (
+            f"color: {theme.TEXT_DISABLED}; font-size: 11px; background: transparent;"
+        )
+        self._esc_hint.setStyleSheet(self._ESC_HINT_BRIGHT)
         self._esc_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
+        self._esc_hint_dim_timer = QTimer(self)
+        self._esc_hint_dim_timer.setSingleShot(True)
+        self._esc_hint_dim_timer.setInterval(3000)
+        self._esc_hint_dim_timer.timeout.connect(
+            lambda: self._esc_hint.setStyleSheet(self._ESC_HINT_DIM)
+        )
+        # Listen for mouse movement on the whole view so any operator
+        # poke wakes the hint up.
+        self.setMouseTracking(True)
+
         self._copyright_lbl = QLabel(f"{APP_NAME}  {COPYRIGHT}", self)
-        self._copyright_lbl.setStyleSheet("color: #1e1e1e; font-size: 11px; background: transparent;")
+        self._copyright_lbl.setStyleSheet(
+            f"color: {theme.TEXT_DISABLED}; font-size: 11px; background: transparent;"
+        )
         self._copyright_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._cue_overlay = QFrame(self)
+        # Translucent dark panel — same surface vocabulary as the
+        # rest of the UI, with enough alpha that the operator can
+        # still see the live cue band through the overlay.
         self._cue_overlay.setStyleSheet(
-            "QFrame { background: rgba(6, 6, 6, 245); border: 1px solid #1f1f1f; border-radius: 12px; }"
+            f"QFrame {{ background: {theme.with_alpha(theme.BG_APP, 0.96)}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_LG}px; }}"
         )
         self._cue_overlay.hide()
 
@@ -274,14 +369,22 @@ class PerformanceView(QWidget):
         overlay_head.setSpacing(10)
 
         overlay_title = QLabel("FULL CUE LIST")
-        overlay_title.setStyleSheet("color: #dcdcdc; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        overlay_title.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; font-size: 16px; "
+            "font-weight: 600; letter-spacing: 2px;"
+        )
         overlay_head.addWidget(overlay_title)
         overlay_head.addStretch()
 
         self._cue_overlay_close_btn = QPushButton("Close")
         self._cue_overlay_close_btn.setFixedHeight(30)
         self._cue_overlay_close_btn.setStyleSheet(
-            "QPushButton { background: #181818; color: #c8c8c8; border: 1px solid #2a2a2a; border-radius: 6px; padding: 0 12px; }"
+            f"QPushButton {{ background: {theme.BG_RAISED}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; padding: 0 12px; }}"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
         )
         self._cue_overlay_close_btn.clicked.connect(self._hide_cue_overlay)
         overlay_head.addWidget(self._cue_overlay_close_btn)
@@ -289,20 +392,30 @@ class PerformanceView(QWidget):
 
         self._cue_list_widget = QListWidget()
         self._cue_list_widget.setStyleSheet(
-            "QListWidget { background: #0d0d0d; color: #d0d0d0; border: 1px solid #1d1d1d; border-radius: 8px; "
+            f"QListWidget {{ background: {theme.BG_APP}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; "
             "outline: none; font-size: 16px; }"
-            "QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #181818; }"
-            "QListWidget::item:selected { background: #214d86; color: #ffffff; }"
+            f"QListWidget::item {{ padding: 8px 10px; "
+            f"border-bottom: 1px solid {theme.BORDER_SUBTLE}; }}"
+            f"QListWidget::item:selected {{ "
+            f"background: {theme.with_alpha(theme.SEMANTIC_SUCCESS, 0.18)}; "
+            f"color: {theme.TEXT_BRIGHT}; }}"
         )
         overlay_lay.addWidget(self._cue_list_widget, stretch=1)
 
         self._cue_list_btn = QPushButton("CUE LIST", self)
         self._cue_list_btn.setFixedHeight(38)
         self._cue_list_btn.setStyleSheet(
-            "QPushButton { background: #181818; color: #dcdcdc; border: 1px solid #2a2a2a; "
-            "border-radius: 8px; padding: 0 14px; font-size: 12px; font-weight: bold; letter-spacing: 2px; }"
-            "QPushButton:hover { background: #222222; }"
-            "QPushButton:pressed { background: #101010; }"
+            f"QPushButton {{ background: {theme.BG_RAISED}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; padding: 0 14px; "
+            "font-size: 12px; font-weight: 600; letter-spacing: 2px; }"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
+            f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
         )
         self._cue_list_btn.clicked.connect(self._toggle_cue_overlay)
 
@@ -382,7 +495,11 @@ class PerformanceView(QWidget):
 
         if countdown is not None and self._countdown_enabled:
             m, s = divmod(int(countdown), 60)
-            color = "#dc4040" if countdown < 10 else "#ffffff"
+            # Sub-10-second countdown flips to the danger hue,
+            # matching the imminent-countdown treatment in the
+            # main-window CueCard (c5).  Same colour, same meaning.
+            color = (theme.SEMANTIC_DANGER if countdown < 10
+                     else theme.TEXT_BRIGHT)
             self._countdown_lbl.setText(f"{m:02d}:{s:02d}")
             self._countdown_lbl.setStyleSheet(f"color: {color};")
         else:
@@ -398,27 +515,31 @@ class PerformanceView(QWidget):
         else:
             db_text = f"{db:.1f} dB"
         self._signal_level_lbl.setText(db_text)
+        self._vu.set_db(db)
 
+        # Four states, each routed to a single semantic token so the
+        # Performance Mode indicator matches the same colour anywhere
+        # else it appears (signal dot, web banner, START button).
         if warning == "Clipping!":
-            state_text = "CLIPPING"
-            state_color = "#dc4040"
-            level_color = "#dc4040"
-            dot_color = "#dc4040"
+            state_text  = "CLIPPING"
+            state_color = theme.SEMANTIC_DANGER
+            level_color = theme.SEMANTIC_DANGER
+            dot_color   = theme.SEMANTIC_DANGER
         elif warning == "Weak signal":
-            state_text = "WEAK"
-            state_color = "#d6a638"
-            level_color = "#d6a638"
-            dot_color = "#d6a638"
+            state_text  = "WEAK"
+            state_color = theme.SEMANTIC_WARNING
+            level_color = theme.SEMANTIC_WARNING
+            dot_color   = theme.SEMANTIC_WARNING
         elif signal_ok:
-            state_text = "LIVE"
-            state_color = "#4bc373"
-            level_color = "#dcdcdc"
-            dot_color = "#4bc373"
+            state_text  = "LIVE"
+            state_color = theme.SEMANTIC_SUCCESS
+            level_color = theme.TEXT_PRIMARY
+            dot_color   = theme.SEMANTIC_SUCCESS
         else:
-            state_text = "NO SIGNAL"
-            state_color = "#d75a5a"
-            level_color = "#7a7a7a"
-            dot_color = "#d75a5a"
+            state_text  = "NO SIGNAL"
+            state_color = theme.SEMANTIC_DANGER
+            level_color = theme.TEXT_MUTED
+            dot_color   = theme.SEMANTIC_DANGER
 
         self._signal_state_lbl.setText(state_text)
         self._signal_state_lbl.setStyleSheet(f"color: {state_color};")
@@ -428,6 +549,7 @@ class PerformanceView(QWidget):
     def set_cues(self, cues: List):
         self._cues = list(cues)
         self._cue_list_widget.clear()
+        base_bg = QColor(theme.BG_APP)
         for cue in self._cues:
             if getattr(cue, "is_divider", False):
                 text = f"[SECTION] {cue.name}"
@@ -436,16 +558,29 @@ class PerformanceView(QWidget):
                 text = f"{tc}   {cue.name or '—'}"
             item = QListWidgetItem(text)
             if getattr(cue, "is_divider", False):
-                item.setForeground(QColor("#c7d0f5"))
-                item.setBackground(QColor("#182038"))
+                # Neutral-grey section header — same vocabulary as the
+                # main cue table (b2).  Was a warm amber that clashed
+                # with the new operator-amber colour for Audio.
+                item.setForeground(QColor(theme.SECTION_TEXT))
+                item.setBackground(QColor(theme.SECTION_BG))
                 f = item.font()
                 f.setBold(True)
                 item.setFont(f)
             elif getattr(cue, "color", ""):
                 cue_color = _named_color(getattr(cue, "color", ""))
                 if cue_color is not None:
-                    item.setBackground(cue_color.darker(260))
-                    item.setForeground(QColor("#f0f0f0"))
+                    # 14 % blend over the panel bg — a touch stronger
+                    # than the table's 7 % so the row still reads as
+                    # "tagged" inside the more compact overlay.  Plus a
+                    # saturated swatch icon on the left so the colour
+                    # reads even when the operator skims past quickly.
+                    inv = 1.0 - 0.14
+                    r = int(round(base_bg.red()   * inv + cue_color.red()   * 0.14))
+                    g = int(round(base_bg.green() * inv + cue_color.green() * 0.14))
+                    b = int(round(base_bg.blue()  * inv + cue_color.blue()  * 0.14))
+                    item.setBackground(QColor(r, g, b))
+                    item.setForeground(QColor(theme.TEXT_PRIMARY))
+                    item.setIcon(_swatch_icon(cue_color))
             self._cue_list_widget.addItem(item)
         self._refresh_cue_overlay_selection()
 
@@ -466,7 +601,8 @@ class PerformanceView(QWidget):
         name_size = self._settings.perf_operator_name_size if self._settings else 12
 
         for name in self._operator_names:
-            card = _OperatorCard(name, op_size, name_size)
+            card = _OperatorCard(name, op_size, name_size,
+                                 name_color=self._operator_color(name))
             self._ops_hlay.addWidget(card)
             self._op_widgets.append(card)
 
@@ -480,10 +616,28 @@ class PerformanceView(QWidget):
             lbl = QLabel()
             f = QFont(); f.setPointSize(14); f.setItalic(True)
             lbl.setFont(f)
-            lbl.setStyleSheet("color: #e6c840;")
+            # Rich text so the role name can carry its semantic colour
+            # while the comment line reads in white — same split as
+            # the current-cue _OperatorCard (role-coloured header,
+            # neutral white command text).
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setWordWrap(True)
             self._next_ops_hlay.addWidget(lbl)
             self._next_op_labels.append(lbl)
+
+    def _operator_color(self, name: str) -> str:
+        """
+        Resolve an operator role name to its display colour.  An
+        explicit override in settings.operator_colors wins; otherwise
+        ui.theme.operator_color() picks a sensible colour from the
+        alias map (Lighting / Audio / Stage Manager) or the fallback
+        cycle for unknown roles.
+        """
+        if self._settings and self._settings.operator_colors:
+            override = self._settings.operator_colors.get(name)
+            if override:
+                return override
+        return theme.operator_color(name, tuple(self._operator_names))
 
     def _update_operator_cards(self, cue):
         comments = cue.operator_comments if hasattr(cue, "operator_comments") else {}
@@ -502,7 +656,16 @@ class PerformanceView(QWidget):
                 name = self._operator_names[i]
                 comment = comments.get(name, "")
                 if comment:
-                    lbl.setText(f"{name}:\n{comment}")
+                    color = self._operator_color(name)
+                    # Escape angle brackets so an operator note like
+                    # "<go>" doesn't get parsed as a (broken) tag.
+                    safe_name = name.replace("<", "&lt;").replace(">", "&gt;")
+                    safe_comment = comment.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                    lbl.setText(
+                        f"<span style='color:{color}; font-weight:bold;'>"
+                        f"{safe_name.upper()}</span><br>"
+                        f"<span style='color:{theme.TEXT_BRIGHT};'>{safe_comment}</span>"
+                    )
                     lbl.setVisible(True)
                 else:
                     lbl.setVisible(False)
@@ -536,6 +699,24 @@ class PerformanceView(QWidget):
             item.setSelected(True)
             self._cue_list_widget.scrollToItem(item, QListWidget.ScrollHint.PositionAtCenter)
         self._cue_list_widget.blockSignals(False)
+
+    # ── Esc hint visibility ───────────────────────────────────────────────────
+
+    def _wake_esc_hint(self):
+        """Brighten the hint and (re)start the fade-to-dim timer."""
+        if hasattr(self, "_esc_hint"):
+            self._esc_hint.setStyleSheet(self._ESC_HINT_BRIGHT)
+            self._esc_hint_dim_timer.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Welcome the operator into perf mode with the hint clearly
+        # readable; it'll fade after a few seconds.
+        self._wake_esc_hint()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        self._wake_esc_hint()
 
     # ── layout ────────────────────────────────────────────────────────────────
 
@@ -573,36 +754,130 @@ class PerformanceView(QWidget):
 
 # ── Operator card widget ──────────────────────────────────────────────────────
 
+class _AutoShrinkLabel(QLabel):
+    """
+    QLabel that drops its own font size until word-wrapped text fits
+    inside a fixed maximum height. Used for operator comments in
+    Performance Mode so a long note shrinks ITSELF instead of growing
+    the operator row and pushing the Next Cue strip off-screen.
+
+    Each label shrinks independently — operators with short notes
+    keep the base font size; only the verbose operator pays the cost.
+    """
+
+    def __init__(self, base_pt: int, min_pt: int = 11, parent=None):
+        super().__init__(parent)
+        self._base_pt = base_pt
+        self._min_pt = min_pt
+        self._max_h = 0
+        self.setWordWrap(True)
+
+    def set_base_pt(self, pt: int):
+        self._base_pt = pt
+        self._fit()
+
+    def set_max_height(self, h: int):
+        self._max_h = h
+        self.setMaximumHeight(h if h > 0 else 16777215)
+        self._fit()
+
+    def setText(self, text: str):  # type: ignore[override]
+        super().setText(text)
+        self._fit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self):
+        from PyQt6.QtGui import QFontMetrics
+        text = self.text()
+        w = self.width()
+        if not text or w <= 0 or self._max_h <= 0:
+            self._apply_pt(self._base_pt)
+            return
+        # Walk from base size down to min, stop at the largest that fits.
+        for pt in range(self._base_pt, self._min_pt - 1, -1):
+            f = self.font()
+            f.setPointSize(pt)
+            metrics = QFontMetrics(f)
+            rect = metrics.boundingRect(
+                0, 0, w, 99999,
+                int(Qt.TextFlag.TextWordWrap),
+                text,
+            )
+            if rect.height() <= self._max_h:
+                self._apply_pt(pt)
+                return
+        # Couldn't fit even at min — settle at min and let the label
+        # clip rather than overflow the row.
+        self._apply_pt(self._min_pt)
+
+    def _apply_pt(self, pt: int):
+        f = self.font()
+        if f.pointSize() != pt:
+            f.setPointSize(pt)
+            self.setFont(f)
+
+
 class _OperatorCard(QWidget):
     """A single operator column card with name header + comment."""
 
-    def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12, parent=None):
+    def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12,
+                 name_color: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.op_name = op_name
+        self._base_font_size = font_size
         self.setStyleSheet(
-            "background: #111118; border-radius: 8px;"
+            f"background: {theme.BG_SURFACE}; "
+            f"border-radius: {theme.RADIUS_LG}px;"
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(4)
 
-        self._name_lbl = QLabel(op_name)
+        # Operator role colour: per-operator override from settings if
+        # provided, otherwise theme.operator_color() resolves the role
+        # name through the alias map (Lighting → blue, Audio → amber,
+        # Stage Manager → purple) or the stable cycle palette.  Each
+        # operator on the stage monitor immediately spots their own
+        # column without reading the label.
+        resolved_color = name_color or theme.operator_color(op_name)
+
+        self._name_lbl = QLabel(op_name.upper())
         f_name = QFont()
         f_name.setPointSize(name_size)
         f_name.setBold(True)
         self._name_lbl.setFont(f_name)
         self._name_lbl.setStyleSheet(
-            "color: #7a7acd; letter-spacing: 1px; background: transparent;"
+            f"color: {resolved_color}; letter-spacing: 1.5px; background: transparent;"
         )
         lay.addWidget(self._name_lbl)
 
-        self._comment_lbl = QLabel("")
+        # Auto-shrinking comment label — see _AutoShrinkLabel for the
+        # fit logic. min_pt=11 keeps ridiculously long notes still legible.
+        self._comment_lbl = _AutoShrinkLabel(base_pt=font_size, min_pt=11)
         f_comment = QFont()
         f_comment.setPointSize(font_size)
         self._comment_lbl.setFont(f_comment)
-        self._comment_lbl.setStyleSheet("color: #e6c840; background: transparent;")
-        self._comment_lbl.setWordWrap(True)
+        # Comment text in pure white — the colour-coded role label
+        # above already says "this is the lighting cue", so the
+        # command itself stays neutral and reads at maximum contrast
+        # against the dark card surface, important when the operator
+        # is reading from across a low-lit stage.
+        self._comment_lbl.setStyleSheet(
+            f"color: {theme.TEXT_BRIGHT}; background: transparent;"
+        )
         lay.addWidget(self._comment_lbl)
+
+        # Cap the comment area at ~10 lines of base-size text. 4 was too
+        # aggressive — even short content like a 6-bullet list got
+        # shrunk down to 12 pt because it didn't fit in 4 lines. With
+        # 10 the operator can write a typical multi-line note at full
+        # size; only genuinely huge text shrinks itself to fit.
+        from PyQt6.QtGui import QFontMetrics
+        line_h = QFontMetrics(f_comment).lineSpacing()
+        self._comment_lbl.set_max_height(line_h * 10)
 
         lay.addStretch()
 
@@ -614,3 +889,15 @@ class _OperatorCard(QWidget):
 def _named_color(name: str) -> Optional[QColor]:
     value = _CUE_COLORS.get(name.lower().strip())
     return QColor(value) if value else None
+
+
+def _swatch_icon(color: QColor, size: int = 14) -> QIcon:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QBrush(color))
+    p.setPen(QPen(QColor(0, 0, 0, 80), 1))
+    p.drawRoundedRect(1, 1, size - 2, size - 2, 3, 3)
+    p.end()
+    return QIcon(pm)

@@ -1,21 +1,22 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Dict, Optional
 
 import html
 import logging
 import os
 import platform
 import queue
+import sys
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer, QSettings
 from PyQt6.QtGui import (
-    QColor, QFont, QPalette, QKeySequence, QShortcut,
-    QPainter, QBrush, QPixmap, QTextDocument, QPageSize,
+    QColor, QFont, QPalette, QKeySequence, QShortcut, QAction,
+    QPainter, QPixmap,
 )
-from PyQt6.QtPrintSupport import QPrinter
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QFileDialog, QMessageBox,
     QFrame, QStackedWidget, QDialog, QSplitter,
 )
@@ -28,12 +29,13 @@ from ui.fonts import mono_font, sans_font
 from ui.performance_view import PerformanceView
 from ui.settings_dialog import SettingsDialog
 from ui.remote_panel import RemotePanel
+from ui import theme
 from web_remote import WebRemoteServer
 
 logger = logging.getLogger(__name__)
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "v0.97β"
+VERSION   = "v1.0β"
 COPYRIGHT = "© 2026 ØJE Studio"
 WEBSITE   = "oje.studio"
 EMAIL     = "hello@oje.studio"
@@ -109,17 +111,20 @@ class CueCard(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.Box)
         self.setStyleSheet(
-            f"CueCard {{ background: {DARK_PANEL.name()}; "
-            f"border: 1px solid {DARK_BORDER.name()}; border-radius: 6px; }}"
+            f"CueCard {{ background: {theme.BG_SURFACE}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_LG}px; }}"
         )
         self._countdown_enabled = True
+        self._operator_names: list = []
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 10, 12, 10)
-        lay.setSpacing(4)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
 
         tl = QLabel(title.upper())
         tl.setStyleSheet(
-            f"color: {TEXT_DIM.name()}; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+            f"color: {theme.TEXT_DIM}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 1.5px;"
         )
         lay.addWidget(tl)
 
@@ -127,20 +132,19 @@ class CueCard(QFrame):
         fn = QFont(); fn.setPointSize(20); fn.setBold(True)
         self.name_lbl.setFont(fn)
         self.name_lbl.setWordWrap(True)
-        self.name_lbl.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
+        self.name_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         lay.addWidget(self.name_lbl)
 
         self.desc_lbl = QLabel("")
-        self.desc_lbl.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 13px;")
+        self.desc_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 13px;")
         self.desc_lbl.setWordWrap(True)
         lay.addWidget(self.desc_lbl)
 
-        self.ops_lbl = QLabel("")
-        self.ops_lbl.setStyleSheet(
-            f"color: {ACCENT_YELLOW.name()}; font-size: 12px;"
-        )
-        self.ops_lbl.setWordWrap(True)
-        lay.addWidget(self.ops_lbl)
+        # Operator notes are NOT rendered in the main window cue cards —
+        # they got squashed and read poorly. The full operator notes
+        # surface in Performance Mode and the Web Remote (which have
+        # space) and are edited via the OperatorEditPanel in Edit Cues.
+        self.ops_lbl = None
 
         self.cd_lbl = QLabel("")
         self.cd_lbl.setFont(mono_font(16))
@@ -152,27 +156,24 @@ class CueCard(QFrame):
     def set_countdown_enabled(self, enabled: bool):
         self._countdown_enabled = enabled
 
+    def set_operators(self, operator_names: list):
+        self._operator_names = list(operator_names)
+
     def set_cue(self, cue, countdown: float = None):
         if cue is None:
             self.name_lbl.setText("—")
             self.desc_lbl.setText("")
-            self.ops_lbl.setText("")
             self.cd_lbl.setText("")
             return
         self.name_lbl.setText(cue.name or "—")
         self.desc_lbl.setText(cue.description)
-        # Show operator comments vertically (one per line)
-        ops_text = ""
-        if cue.operator_comments:
-            lines = [
-                f"{k}: {v.replace(chr(10), chr(10) + '    ')}"
-                for k, v in cue.operator_comments.items() if v
-            ]
-            ops_text = "\n".join(lines)
-        self.ops_lbl.setText(ops_text)
         if countdown is not None and self._countdown_enabled:
             m, s  = divmod(int(countdown), 60)
-            color = ACCENT_RED.name() if countdown < 10 else TEXT_BRIGHT.name()
+            # Sub-10-second countdown flips to the danger hue so the
+            # operator's eye snaps to the upcoming GO without needing
+            # a separate flashing indicator.
+            color = (theme.SEMANTIC_DANGER if countdown < 10
+                     else theme.TEXT_BRIGHT)
             self.cd_lbl.setText(f"in {m:02d}:{s:02d}")
             self.cd_lbl.setStyleSheet(f"color: {color}; font-size: 16px;")
         else:
@@ -188,7 +189,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME}  {VERSION}")
+        self._base_title = f"{APP_NAME}  {VERSION}"
+        self.setWindowTitle(self._base_title)
         self.setMinimumSize(900, 640)
 
         self._qsettings       = QSettings("OJEStudio", "OJECueMonitor")
@@ -261,73 +263,77 @@ class MainWindow(QMainWindow):
         # ── Header ────────────────────────────────────────────────────────────
         header = QWidget()
         header.setFixedHeight(52)
-        header.setStyleSheet(f"background: {NEAR_BLACK.name()};")
+        header.setStyleSheet(f"background: {theme.BG_HEADER};")
         hl = QHBoxLayout(header)
         hl.setContentsMargins(14, 0, 14, 0)
         hl.setSpacing(10)
 
-        app_lbl = QLabel(APP_NAME)
-        app_lbl.setFont(sans_font(15, bold=True))
-        app_lbl.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 1px;")
-        hl.addWidget(app_lbl)
+        hl.addWidget(BrandMark(parent=header), alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        ver_lbl = QLabel(VERSION)
-        ver_lbl.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 11px;")
-        hl.addWidget(ver_lbl)
-
-        hl.addWidget(_vline())
+        hl.addWidget(_dot_sep())
 
         self._signal_dot = QLabel("●")
-        self._signal_dot.setStyleSheet(f"color: {ACCENT_RED.name()}; font-size: 16px;")
+        self._signal_dot.setStyleSheet(f"color: {theme.SEMANTIC_DANGER}; font-size: 16px;")
         hl.addWidget(self._signal_dot)
 
         self._tc_label = QLabel("--:--:--:--")
         self._tc_label.setFont(mono_font(22, bold=True))
-        self._tc_label.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 2px;")
+        self._tc_label.setStyleSheet(f"color: {theme.TEXT_BRIGHT}; letter-spacing: 2px;")
         hl.addWidget(self._tc_label)
 
-        self._fps_label = QLabel("FPS: —")
-        self._fps_label.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 12px;")
+        hl.addWidget(_dot_sep())
+
+        self._fps_label = QLabel("FPS —")
+        self._fps_label.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 12px;")
         hl.addWidget(self._fps_label)
+
+        hl.addWidget(_dot_sep())
 
         self._vu = VUMeter()
         hl.addWidget(self._vu)
 
         self._signal_warn = QLabel("")
-        self._signal_warn.setStyleSheet(f"color: {ACCENT_ORANGE.name()}; font-size: 11px;")
+        self._signal_warn.setStyleSheet(f"color: {theme.SEMANTIC_WARNING}; font-size: 11px;")
         hl.addWidget(self._signal_warn)
 
         hl.addStretch()
 
         self._live_label = QLabel("● LIVE")
         self._live_label.setStyleSheet(
-            f"color: {ACCENT_GREEN.name()}; font-size: 12px; font-weight: bold;"
+            f"color: {theme.SEMANTIC_SUCCESS}; font-size: 12px; font-weight: bold;"
         )
         self._live_label.setVisible(False)
         hl.addWidget(self._live_label)
 
-        # Logo in header
+        # Show-specific logo (pulled from .ojeshow settings.logo_path).
+        # Distinct from the BrandMark on the left — that's the studio
+        # mark, this is whatever logo the operator wants for the
+        # current production.  Hidden until set_show_settings wires
+        # in a real pixmap.
         self._header_logo = QLabel()
         self._header_logo.setVisible(False)
         hl.addWidget(self._header_logo)
 
-        hl.addWidget(_vline())
-
-        # Transport controls live in the header top-right so they sit
-        # where the operator's eyes already are when reading timecode.
-        self._btn_perf = QPushButton("PERFORMANCE")
-        self._btn_perf.setFixedHeight(30)
-        self._btn_perf.setFixedWidth(130)
-        self._btn_perf.setStyleSheet(_perf_btn_style())
-        self._btn_perf.clicked.connect(self._enter_perf_mode)
-        hl.addWidget(self._btn_perf)
-
-        self._btn_start = QPushButton("START")
-        self._btn_start.setFixedHeight(30)
-        self._btn_start.setFixedWidth(72)
-        self._btn_start.setStyleSheet(_start_btn_style())
-        self._btn_start.clicked.connect(self._toggle_start)
-        hl.addWidget(self._btn_start)
+        # Wall clock at the far right of the header — sized to match the
+        # timecode (mono 24, bold) so the eye reads them as a pair:
+        # "show timecode" on one side, "real-world time" on the other.
+        # Small clock-face icon prefix makes it unmistakable that this
+        # is wall time, not another timecode.
+        from ui.icons import make_icon
+        hl.addWidget(_dot_sep())
+        self._clock_icon_lbl = QLabel()
+        self._clock_icon_lbl.setPixmap(
+            make_icon("clock", theme.TEXT_DIM).pixmap(20, 20)
+        )
+        hl.addWidget(self._clock_icon_lbl)
+        self._clock_label = QLabel("")
+        self._clock_label.setFont(mono_font(24, bold=True))
+        self._clock_label.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
+        hl.addWidget(self._clock_label)
+        # Header now ends here — Performance and Start moved to the
+        # footer alongside Edit Cues / Remote so the operator sees one
+        # clean monitoring strip on top and one action strip at the
+        # bottom (instead of mixing both in the header).
 
         root.addWidget(header)
         root.addWidget(_hline())
@@ -379,84 +385,78 @@ class MainWindow(QMainWindow):
         root.addWidget(_hline())
 
         # ── Footer ────────────────────────────────────────────────────────────
+        from ui.icons import make_icon, icon_size
+
         footer = QWidget()
-        footer.setFixedHeight(48)
-        footer.setStyleSheet(f"background: {NEAR_BLACK.name()};")
+        footer.setFixedHeight(56)
+        footer.setStyleSheet(f"background: {theme.BG_HEADER};")
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(12, 0, 12, 0)
         fl.setSpacing(8)
 
-        self._btn_new = QPushButton("New")
-        self._btn_new.setFixedHeight(30)
-        self._btn_new.setToolTip("Create a new empty show")
-        self._btn_new.clicked.connect(self._new_show)
-        fl.addWidget(self._btn_new)
-
-        self._btn_open = QPushButton("Open")
-        self._btn_open.setFixedHeight(30)
-        self._btn_open.setToolTip("Open show file (.ojeshow) or import CSV")
-        self._btn_open.clicked.connect(self._open_show)
-        fl.addWidget(self._btn_open)
-
-        self._btn_save = QPushButton("Save")
-        self._btn_save.setFixedHeight(30)
-        _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
-        self._btn_save.setToolTip(f"Save show file (.ojeshow)  [{_mod}+S]")
-        self._btn_save.clicked.connect(self._save_show)
-        fl.addWidget(self._btn_save)
-
-        self._btn_save_as = QPushButton("Save As...")
-        self._btn_save_as.setFixedHeight(30)
-        self._btn_save_as.setToolTip("Save to a new file")
-        self._btn_save_as.clicked.connect(self._save_show_as)
-        fl.addWidget(self._btn_save_as)
-
-        self._btn_export_pdf = QPushButton("Export PDF")
-        self._btn_export_pdf.setFixedHeight(30)
-        self._btn_export_pdf.setToolTip("Export printable cue sheet as PDF")
-        self._btn_export_pdf.clicked.connect(self._export_pdf)
-        fl.addWidget(self._btn_export_pdf)
-
-        fl.addWidget(_vline())
-
-        self._btn_edit = QPushButton("Edit Cues")
-        self._btn_edit.setFixedHeight(30)
-        self._btn_edit.setCheckable(True)
-        self._btn_edit.clicked.connect(self._toggle_edit_mode)
-        fl.addWidget(self._btn_edit)
-
-        self._btn_settings = QPushButton("Settings")
-        self._btn_settings.setFixedHeight(30)
-        self._btn_settings.clicked.connect(self._open_settings)
-        fl.addWidget(self._btn_settings)
-
-        self._btn_remote = QPushButton("Remote")
-        self._btn_remote.setFixedHeight(30)
-        self._btn_remote.setToolTip("Start/stop web remote for other devices")
-        self._btn_remote.setCheckable(True)
-        self._btn_remote.clicked.connect(self._toggle_remote)
-        fl.addWidget(self._btn_remote)
-
-        fl.addStretch()
-
+        # ── Left edge: Help + Edit Cues ──────────────────────────────
+        # Tiny "?" pill on the very left, dim — quick path to the help
+        # dialog without occupying the menu bar.
         self._btn_help = QPushButton("?")
         self._btn_help.setFixedSize(28, 28)
         self._btn_help.setToolTip("Help & Keyboard Shortcuts  [F1]")
+        self._btn_help.setStyleSheet(_help_btn_style())
         self._btn_help.clicked.connect(self._show_help)
         fl.addWidget(self._btn_help)
 
-        cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}  ·  {EMAIL}")
-        cr_lbl.setStyleSheet(f"color: {QColor(75,75,75).name()}; font-size: 10px;")
+        # Show prep lives on the left — the operator does this before
+        # the show starts and may dip back in mid-show to tweak notes.
+        self._btn_edit = QPushButton(" Edit Cues")
+        self._btn_edit.setIcon(make_icon("edit", theme.TEXT_PRIMARY))
+        self._btn_edit.setIconSize(icon_size(16))
+        self._btn_edit.setFixedHeight(34)
+        self._btn_edit.setCheckable(True)
+        self._btn_edit.setStyleSheet(_secondary_btn_style())
+        self._btn_edit.clicked.connect(self._toggle_edit_mode)
+        fl.addWidget(self._btn_edit)
+
+        fl.addStretch()
+        # Studio copyright in the middle, tiny + dim — recognised but
+        # not competing for attention.
+        cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}")
+        cr_lbl.setStyleSheet(f"color: {theme.TEXT_DISABLED}; font-size: 10px;")
         fl.addWidget(cr_lbl)
+        fl.addStretch()
 
-        fl.addWidget(_vline())
+        # ── Right cluster: Remote → Performance → START ──────────────
+        # Reads left-to-right as the show-startup order:
+        #   Remote   — let the team's phones connect
+        #   Performance — bring the operator screen up
+        #   START    — arm LTC and run the show
+        self._btn_remote = QPushButton(" Remote")
+        self._btn_remote.setIcon(make_icon("remote", theme.TEXT_PRIMARY))
+        self._btn_remote.setIconSize(icon_size(16))
+        self._btn_remote.setFixedHeight(34)
+        self._btn_remote.setToolTip("Start/stop web remote for other devices")
+        self._btn_remote.setCheckable(True)
+        self._btn_remote.setStyleSheet(_secondary_btn_style())
+        self._btn_remote.clicked.connect(self._toggle_remote)
+        fl.addWidget(self._btn_remote)
 
-        # Wall clock moved down here from the header — still visible for the
-        # operator tracking intermission / break times, but out of the way.
-        self._clock_label = QLabel("")
-        self._clock_label.setFont(mono_font(11))
-        self._clock_label.setStyleSheet(f"color: {TEXT_DIM.name()};")
-        fl.addWidget(self._clock_label)
+        self._btn_perf = QPushButton(" Performance")
+        self._btn_perf.setIcon(make_icon("fullscreen", theme.TEXT_PRIMARY))
+        self._btn_perf.setIconSize(icon_size(16))
+        self._btn_perf.setFixedHeight(34)
+        self._btn_perf.setStyleSheet(_secondary_btn_style())
+        self._btn_perf.clicked.connect(self._enter_perf_mode)
+        fl.addWidget(self._btn_perf)
+
+        # START is THE primary action — visually distinct (taller, wider,
+        # full green) so the eye lands on it first.  Switches to red
+        # in stop_btn_style while LTC is decoding.
+        self._btn_start = QPushButton(" START")
+        self._btn_start.setIcon(make_icon("record", "#ffffff"))
+        self._btn_start.setIconSize(icon_size(18))
+        self._btn_start.setFixedHeight(40)
+        self._btn_start.setMinimumWidth(110)
+        self._btn_start.setStyleSheet(_start_btn_style())
+        self._btn_start.clicked.connect(self._toggle_start)
+        fl.addWidget(self._btn_start)
 
         root.addWidget(footer)
 
@@ -470,13 +470,15 @@ class MainWindow(QMainWindow):
     # ── shortcuts ─────────────────────────────────────────────────────────────
 
     def _setup_shortcuts(self):
+        # Window-wide shortcuts that aren't menu items (Space = mark
+        # cue, P = toggle Performance, Escape = exit Performance).
+        # Menu actions own their own accelerators (Cmd+N/O/S etc.) —
+        # see _build_menu_bar — so we don't duplicate them here.
         QShortcut(QKeySequence("Space"),  self).activated.connect(self._mark_cue)
         QShortcut(QKeySequence("P"),      self).activated.connect(self._toggle_perf_mode)
         QShortcut(QKeySequence("Escape"), self).activated.connect(self._exit_perf_mode)
-        QShortcut(QKeySequence("F1"),     self).activated.connect(self._show_help)
-        QShortcut(QKeySequence.StandardKey.Save, self).activated.connect(self._save_show)
-        QShortcut(QKeySequence.StandardKey.New,  self).activated.connect(self._new_show)
-        QShortcut(QKeySequence.StandardKey.Open, self).activated.connect(self._open_show)
+
+        self._build_menu_bar()
 
     # ── state ─────────────────────────────────────────────────────────────────
 
@@ -508,13 +510,8 @@ class MainWindow(QMainWindow):
         should proceed with normal startup).
         """
         path = self._autosave_path()
-        reply = QMessageBox.question(
-            self, "Restore Unsaved Changes",
-            "The previous session ended before changes were saved.\n\n"
-            "Restore the autosaved cue list?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        last_name = os.path.basename(last_show) if last_show else ""
+        if not _RecoveryDialog.ask(self, last_name):
             self._clear_autosave()
             return False
 
@@ -530,7 +527,7 @@ class MainWindow(QMainWindow):
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
             name = os.path.basename(last_show) if last_show else "Recovered Show"
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
             # Keep the autosave file around until the user performs a real
             # save — the loaded state is unsaved as far as the original .ojeshow
             # is concerned, but the autosave file on disk already reflects it.
@@ -583,6 +580,64 @@ class MainWindow(QMainWindow):
             return self._save_show()
         return True
 
+    # ── Menu bar ──────────────────────────────────────────────────────────────
+
+    def _build_menu_bar(self):
+        """
+        Native menu bar — File / Settings / Help. On macOS Qt promotes
+        this to the top-of-screen system menu automatically. Action
+        roles tag Settings as Preferences and About as AboutRole so
+        macOS files them under the app menu in the conventional
+        place.
+        """
+        bar = self.menuBar()
+
+        # ── File ─────────────────────────────
+        m_file = bar.addMenu("&File")
+
+        a_new = QAction("&New Show", self)
+        a_new.setShortcut(QKeySequence.StandardKey.New)
+        a_new.triggered.connect(self._new_show)
+        m_file.addAction(a_new)
+
+        a_open = QAction("&Open Show…", self)
+        a_open.setShortcut(QKeySequence.StandardKey.Open)
+        a_open.triggered.connect(self._open_show)
+        m_file.addAction(a_open)
+
+        m_file.addSeparator()
+
+        a_save = QAction("&Save", self)
+        a_save.setShortcut(QKeySequence.StandardKey.Save)
+        a_save.triggered.connect(self._save_show)
+        m_file.addAction(a_save)
+
+        a_save_as = QAction("Save &As…", self)
+        a_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
+        a_save_as.triggered.connect(self._save_show_as)
+        m_file.addAction(a_save_as)
+
+        # ── Settings ─────────────────────────
+        # Qt's TextHeuristicRole auto-detects the words "Settings",
+        # "Preferences", "Options", "Configure" in QAction text and
+        # silently moves the action to the macOS application menu.
+        # That's where last time the Settings submenu showed up empty —
+        # the action got teleported. Force NoRole so the action stays
+        # exactly where we put it.
+        a_settings = QAction("Settings…", self)
+        a_settings.setMenuRole(QAction.MenuRole.NoRole)
+        a_settings.setShortcut(QKeySequence("Ctrl+,"))
+        a_settings.triggered.connect(self._open_settings)
+        m_settings = bar.addMenu("&Settings")
+        m_settings.addAction(a_settings)
+
+        # ── Help ─────────────────────────────
+        m_help = bar.addMenu("&Help")
+        a_help = QAction("Keyboard Shortcuts && Help", self)
+        a_help.setShortcut(QKeySequence("F1"))
+        a_help.triggered.connect(self._show_help)
+        m_help.addAction(a_help)
+
     def _new_show(self):
         if not self._confirm_discard_or_save(
             "New Show",
@@ -595,7 +650,8 @@ class MainWindow(QMainWindow):
         self._engine.cues.clear()
         self._table.load_cues(self._engine.cues)
         self._apply_settings(self._show_settings)
-        self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  New Show")
+        self._mark_clean()
+        self._set_base_title(f"{APP_NAME}  {VERSION}  —  New Show")
         self._clear_autosave()
         logger.info("New show created")
 
@@ -624,7 +680,8 @@ class MainWindow(QMainWindow):
             self._engine.load_show_cues(self._show.cues)
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._mark_clean()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._qsettings.setValue("last_show", path)
             self._clear_autosave()
         except (OSError, ValueError) as e:
@@ -637,7 +694,9 @@ class MainWindow(QMainWindow):
             self._engine.load_show_cues(self._show.cues)
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)} (imported)")
+            # Treat freshly imported as dirty — they need to Save As to persist.
+            self._mark_dirty()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)} (imported)")
             self._clear_autosave()
         except (OSError, CueParseError) as e:
             QMessageBox.critical(self, "Import Error", str(e))
@@ -664,7 +723,8 @@ class MainWindow(QMainWindow):
         try:
             self._show.save(path)
             self._qsettings.setValue("last_show", path)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._mark_clean()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._flash_save_ok()
             self._clear_autosave()
             logger.info("Saved to %s", path)
@@ -675,16 +735,12 @@ class MainWindow(QMainWindow):
             return False
 
     def _flash_save_ok(self):
-        self._btn_save.setText("Saved!")
-        self._btn_save.setStyleSheet(
-            f"QPushButton {{ background: {QColor(48,125,75).name()}; "
-            f"color: white; border-radius: 4px; }}"
-        )
-        QTimer.singleShot(1500, self._reset_save_btn)
-
-    def _reset_save_btn(self):
-        self._btn_save.setText("Save")
-        self._btn_save.setStyleSheet("")
+        # Save button moved to the File menu — surface the confirmation
+        # via the window title for ~1.5 s instead of a toast. Stash and
+        # restore the base title so the dirty marker still works after.
+        saved_base = self._base_title
+        self.setWindowTitle(f"{saved_base}    ✓ Saved")
+        QTimer.singleShot(1500, self._refresh_window_title)
 
     def _save_show_as(self) -> bool:
         if self._show is None:
@@ -702,19 +758,13 @@ class MainWindow(QMainWindow):
         try:
             self._show.save(path)
             self._qsettings.setValue("last_show", path)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._clear_autosave()
             logger.info("Saved as %s", path)
             return True
         except OSError as e:
             QMessageBox.critical(self, "Save Error", str(e))
             return False
-
-    def _default_pdf_export_path(self) -> str:
-        if self._show and self._show.file_path:
-            base, _ = os.path.splitext(self._show.file_path)
-            return base + ".pdf"
-        return os.path.join(os.path.expanduser("~"), "OJE Cue Sheet.pdf")
 
     def _current_show_title(self) -> str:
         if self._show_settings.show_title.strip():
@@ -723,188 +773,6 @@ class MainWindow(QMainWindow):
             stem = os.path.splitext(os.path.basename(self._show.file_path))[0]
             return stem.replace("_", " ")
         return "Untitled Show"
-
-    def _build_pdf_html(self) -> str:
-        operator_names = list(self._show_settings.operator_names or [])
-        show_name = self._current_show_title()
-
-        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        rows = []
-        for cue in self._engine.cues:
-            if cue.is_divider:
-                rows.append(
-                    "<tr class='section'>"
-                    f"<td colspan='5'>{html.escape(cue.name or 'SECTION')}</td>"
-                    "</tr>"
-                )
-                continue
-
-            notes_parts = []
-            for op_name in operator_names:
-                comment = cue.operator_comments.get(op_name, "")
-                if comment:
-                    notes_parts.append(
-                        f"<div class='note'><span class='note-name'>{html.escape(op_name)}</span><br>"
-                        f"{html.escape(comment).replace(chr(10), '<br>')}</div>"
-                    )
-            notes_html = "".join(notes_parts) if notes_parts else "<span class='muted'>—</span>"
-            color_name = (cue.color or "").strip()
-            if color_name:
-                color_html = (
-                    f"<span class='swatch' style='background:{html.escape(_pdf_color_hex(color_name))};'></span>"
-                )
-            else:
-                color_html = "<span class='muted'>—</span>"
-
-            rows.append(
-                "<tr>"
-                f"<td class='tc'>{html.escape(cue.timecode or '')}</td>"
-                f"<td>{html.escape(cue.name or '')}</td>"
-                f"<td>{html.escape(cue.description or '')}</td>"
-                f"<td class='color-cell'>{color_html}</td>"
-                f"<td>{notes_html}</td>"
-                + "</tr>"
-            )
-
-        if not rows:
-            rows.append("<tr><td colspan='99' class='empty'>No cues in show.</td></tr>")
-
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-body {{
-    font-family: Helvetica, Arial, sans-serif;
-    color: #111;
-    font-size: 9.5pt;
-    margin: 40pt 44pt 44pt 44pt;
-}}
-h1 {{
-    font-size: 20pt;
-    margin: 0 0 6pt 0;
-    font-weight: 700;
-}}
-.meta {{
-    color: #666;
-    font-size: 8.5pt;
-    margin-bottom: 16pt;
-}}
-table {{
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-}}
-th, td {{
-    border-bottom: 1px solid #e2e4e8;
-    padding: 7pt 8pt;
-    text-align: left;
-    vertical-align: top;
-    word-wrap: break-word;
-}}
-th {{
-    background: #f7f7f8;
-    color: #6a6a6a;
-    border-top: 1px solid #e2e4e8;
-    font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.8pt;
-}}
-.tc {{
-    white-space: nowrap;
-    font-family: Courier, monospace;
-}}
-.section td {{
-    background: #f3f4f7;
-    border-top: 1px solid #d7dbe2;
-    border-bottom: 1px solid #d7dbe2;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.8pt;
-    color: #333;
-}}
-.color-cell {{
-    white-space: nowrap;
-    text-align: center;
-}}
-.swatch {{
-    display: inline-block;
-    width: 12pt;
-    height: 12pt;
-    border-radius: 999px;
-    vertical-align: middle;
-    border: 1px solid rgba(0,0,0,0.14);
-}}
-.note {{
-    margin-bottom: 7pt;
-    padding-bottom: 7pt;
-    border-bottom: 1px solid #f0f1f3;
-}}
-.note:last-child {{
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-}}
-.note-name {{
-    font-weight: bold;
-    color: #222;
-}}
-.muted {{
-    color: #777;
-}}
-.empty {{
-    color: #666;
-    text-align: center;
-    padding: 18pt;
-}}
-</style>
-</head>
-<body>
-<h1>{html.escape(show_name)}</h1>
-<div class="meta">Generated {html.escape(generated_at)} · {html.escape(APP_NAME)} {html.escape(VERSION)}</div>
-<table>
-<thead>
-<tr>
-<th style="width: 14%;">Timecode</th>
-<th style="width: 18%;">Cue</th>
-<th style="width: 30%;">Description</th>
-<th style="width: 7%;">Color</th>
-<th style="width: 31%;">Operator Notes</th>
-</tr>
-</thead>
-<tbody>
-{''.join(rows)}
-</tbody>
-</table>
-</body>
-</html>"""
-
-    def _export_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Cue Sheet PDF", self._default_pdf_export_path(),
-            "PDF Files (*.pdf);;All Files (*)"
-        )
-        if not path:
-            return
-        if not path.lower().endswith(".pdf"):
-            path += ".pdf"
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        printer.setOutputFileName(path)
-        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-
-        doc = QTextDocument()
-        doc.setHtml(self._build_pdf_html())
-        try:
-            doc.print(printer)
-            QMessageBox.information(
-                self, "PDF Exported",
-                f"Exported printable cue sheet to:\n{path}"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "PDF Export Error", str(e))
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
@@ -929,6 +797,10 @@ th {{
         self._current_card.set_countdown_enabled(settings.countdown_enabled)
         self._next_card.set_countdown_enabled(settings.countdown_enabled)
 
+        # Cue cards need the current operator list to filter out stale keys
+        self._current_card.set_operators(settings.operator_names)
+        self._next_card.set_operators(settings.operator_names)
+
         # Performance view
         self._perf_view.apply_settings(settings)
 
@@ -943,7 +815,12 @@ th {{
 
         if self._web_remote and self._web_remote._running:
             self._web_remote.set_operators(settings.operator_names)
+            self._web_remote.set_operator_colors(settings.operator_colors)
             self._web_remote.set_remote_password(settings.remote_password)
+
+        # Re-render current/next cards so operator list changes take effect
+        # without waiting for the next timecode poll.
+        self._update_cues()
 
     # ── Web Remote ─────────────────────────────────────────────────────────────
 
@@ -959,9 +836,12 @@ th {{
             return
         self._web_remote = WebRemoteServer(port=8080)
         self._web_remote.set_operators(self._show_settings.operator_names)
+        self._web_remote.set_operator_colors(self._show_settings.operator_colors)
         self._web_remote.set_remote_password(self._show_settings.remote_password)
         self._web_remote.start()
-        self._btn_remote.setText("Remote ON")
+        self._btn_remote.setText(" Remote ON")
+        from ui.icons import make_icon
+        self._btn_remote.setIcon(make_icon("remote", "#ffffff"))
         self._btn_remote.setStyleSheet(
             f"QPushButton {{ background: {QColor(48,100,160).name()}; "
             f"color: white; border-radius: 4px; }}"
@@ -973,7 +853,9 @@ th {{
         if self._web_remote:
             self._web_remote.stop()
             self._web_remote = None
-        self._btn_remote.setText("Remote")
+        self._btn_remote.setText(" Remote")
+        from ui.icons import make_icon
+        self._btn_remote.setIcon(make_icon("remote", "#dadada"))
         self._btn_remote.setStyleSheet("")
         logger.info("Web remote stopped")
 
@@ -1001,7 +883,9 @@ th {{
         self._table.set_edit_mode(checked)
         self._edit_toolbar.setVisible(checked)
         if checked:
-            self._btn_edit.setText("Done")
+            self._btn_edit.setText(" Done")
+            from ui.icons import make_icon
+            self._btn_edit.setIcon(make_icon("check", "#dadada"))
             self._btn_edit.setStyleSheet(
                 f"QPushButton {{ background: {QColor(52,120,52).name()}; "
                 f"color: white; border-radius: 4px; }}"
@@ -1009,14 +893,23 @@ th {{
             # Show operator panel if operators are defined
             if self._show_settings.operator_names:
                 self._op_panel.setVisible(True)
-            self._table_splitter.setSizes([70, 30])
+            # 70 / 30 — table is the primary area, panel is the side helper.
+            # setSizes wants absolute pixels (not percentages), and a tiny
+            # [70, 30] gets reshuffled by minimum-size constraints into a
+            # weird "panel takes everything" state. Compute from real width.
+            total = self._table_splitter.width() or 1280
+            self._table_splitter.setSizes(
+                [int(total * 0.70), int(total * 0.30)]
+            )
             row = self._table.currentRow()
             if 0 <= row < len(self._engine.cues):
                 cue = self._engine.cues[row]
                 if not cue.is_divider:
                     self._op_panel.show_for_cue(row, cue)
         else:
-            self._btn_edit.setText("Edit Cues")
+            self._btn_edit.setText(" Edit Cues")
+            from ui.icons import make_icon
+            self._btn_edit.setIcon(make_icon("edit", "#dadada"))
             self._btn_edit.setStyleSheet("")
             self._op_panel.hide_panel()
             self._table_splitter.setSizes([1280, 0])
@@ -1039,6 +932,12 @@ th {{
         if field == "timecode":
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
+        elif field == "color":
+            # Re-style immediately so the new colour shows as a row
+            # tint on the next paint instead of waiting for the
+            # _update_cues tick.
+            self._table.update_highlight(self._engine.cues, None,
+                                         self._current_frames)
         else:
             self._table.refresh_index_column(self._engine.cues)
         self._mark_dirty()
@@ -1133,7 +1032,9 @@ th {{
 
         self._running = True
         self._poll_timer.start()
-        self._btn_start.setText("STOP")
+        self._btn_start.setText(" STOP")
+        from ui.icons import make_icon
+        self._btn_start.setIcon(make_icon("stop", "#ffffff"))
         self._btn_start.setStyleSheet(_stop_btn_style())
         self._live_label.setVisible(True)
 
@@ -1144,7 +1045,9 @@ th {{
         self._running = False
         self._poll_timer.stop()
         self._blink_timer.stop()
-        self._btn_start.setText("START")
+        self._btn_start.setText(" START")
+        from ui.icons import make_icon
+        self._btn_start.setIcon(make_icon("record", "#ffffff"))
         self._btn_start.setStyleSheet(_start_btn_style())
         self._live_label.setVisible(False)
         self._signal_ok = False
@@ -1228,16 +1131,33 @@ th {{
 
         if self._web_remote and self._web_remote._running:
             self._web_remote.broadcast_state(
-                current, nxt, countdown, tc_str, cur_group, nxt_group
+                current, nxt, countdown, tc_str, cur_group, nxt_group,
+                fps=self._last_fps,
+                db=self._last_db,
+                signal_ok=self._signal_ok,
+                running=self._running,
+                signal_warning=self._signal_warning_text,
             )
 
     def _refresh_signal_dot(self):
-        color = ACCENT_GREEN.name() if self._signal_ok else ACCENT_RED.name()
+        # Steady state: green when LTC is locked, red otherwise.
+        # Routed through the design system so the indicator matches
+        # the active-cue green and the connection-lost banner red on
+        # the web remote — same colour, same meaning, anywhere it
+        # appears.
+        color = theme.SEMANTIC_SUCCESS if self._signal_ok else theme.SEMANTIC_DANGER
         self._signal_dot.setStyleSheet(f"color: {color}; font-size: 16px;")
 
     def _do_blink(self):
+        # While waiting for LTC the dot pulses between full danger
+        # red and a faded version of the same hue (25 % alpha) so the
+        # reader's eye registers "trying to lock" without competing
+        # with the timecode for attention.  Using the same base
+        # colour for both blink halves keeps the pulse readable on
+        # any monitor calibration.
         self._blink_state = not self._blink_state
-        color = ACCENT_RED.name() if self._blink_state else QColor(75, 18, 18).name()
+        color = (theme.SEMANTIC_DANGER if self._blink_state
+                 else theme.with_alpha(theme.SEMANTIC_DANGER, 0.25))
         self._signal_dot.setStyleSheet(f"color: {color}; font-size: 16px;")
 
     # ── performance mode ──────────────────────────────────────────────────────
@@ -1356,7 +1276,7 @@ th {{
             os.remove(self._autosave_path())
         except OSError:
             pass
-        self._dirty = False
+        self._mark_clean()
         self._autosave_fresh = True
 
     def _mark_dirty(self):
@@ -1364,6 +1284,20 @@ th {{
             self._log("dirty marked (was clean)")
         self._dirty = True
         self._autosave_fresh = False
+        self._refresh_window_title()
+
+    def _mark_clean(self):
+        self._dirty = False
+        self._refresh_window_title()
+
+    def _set_base_title(self, title: str):
+        """Stash the canonical title; refresh applies the * marker."""
+        self._base_title = title
+        self._refresh_window_title()
+
+    def _refresh_window_title(self):
+        base = getattr(self, "_base_title", f"{APP_NAME}  {VERSION}")
+        self.setWindowTitle(("• " + base) if self._dirty else base)
 
     def _autosave_exists(self) -> bool:
         try:
@@ -1403,53 +1337,64 @@ th {{
         lay.addWidget(_hline())
 
         _mod = "Ctrl" if platform.system() == "Windows" else "Cmd"
+        # Inline <style> keeps the markup readable — kbd, headings, and
+        # body text reuse design-system tokens instead of repeating
+        # hex literals on every <td>.
+        kbd = (
+            f"color:{theme.SEMANTIC_INFO}; font-weight:bold; "
+            f"font-family:'Menlo','Consolas',monospace;"
+        )
+        h_color = theme.TEXT_PRIMARY
+        body_color = theme.TEXT_PRIMARY
+        muted_color = theme.TEXT_MUTED
+        warn_color = theme.SEMANTIC_WARNING
         help_text = (
-            "<h3 style='color:#dcdcdc;'>Keyboard Shortcuts</h3>"
-            "<table cellpadding='4' style='color:#ccc; font-size:13px;'>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+N</td>"
+            f"<h3 style='color:{h_color};'>Keyboard Shortcuts</h3>"
+            f"<table cellpadding='4' style='color:{body_color}; font-size:13px;'>"
+            f"<tr><td style='{kbd}'>{_mod}+N</td>"
             "    <td>New show</td></tr>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+O</td>"
+            f"<tr><td style='{kbd}'>{_mod}+O</td>"
             "    <td>Open show file / import CSV</td></tr>"
-            f"<tr><td style='color:#7a7acd; font-weight:bold;'>{_mod}+S</td>"
+            f"<tr><td style='{kbd}'>{_mod}+S</td>"
             "    <td>Save show</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>P</td>"
+            f"<tr><td style='{kbd}'>P</td>"
             "    <td>Toggle Performance Mode</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Escape</td>"
+            f"<tr><td style='{kbd}'>Escape</td>"
             "    <td>Exit Performance Mode</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Space</td>"
+            f"<tr><td style='{kbd}'>Space</td>"
             "    <td>Manual cue mark (logged)</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>F1</td>"
+            f"<tr><td style='{kbd}'>F1</td>"
             "    <td>This help window</td></tr>"
             "</table>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Edit Mode</h3>"
-            "<table cellpadding='4' style='color:#ccc; font-size:13px;'>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>+ Cue</td>"
+            f"<h3 style='color:{h_color};'>Edit Mode</h3>"
+            f"<table cellpadding='4' style='color:{body_color}; font-size:13px;'>"
+            f"<tr><td style='{kbd}'>+ Cue</td>"
             "    <td>Add cue after selection</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>+ Section</td>"
+            f"<tr><td style='{kbd}'>+ Section</td>"
             "    <td>Add section divider</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Delete</td>"
+            f"<tr><td style='{kbd}'>Delete</td>"
             "    <td>Delete selected rows (multi-select)</td></tr>"
-            "<tr><td style='color:#7a7acd; font-weight:bold;'>Up / Down</td>"
+            f"<tr><td style='{kbd}'>Up / Down</td>"
             "    <td>Move selected cue</td></tr>"
             "</table>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Show File (.ojeshow)</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>Show File (.ojeshow)</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "A single JSON file containing all settings (audio device, operators, "
             "font sizes, logo) and the complete cue list. Replaces the legacy CSV format. "
             "Auto-saved when exiting Edit Mode.</p>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>LTC Timecode</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>LTC Timecode</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "Connect an LTC/SMPTE timecode source to any audio input. "
             "Select the device and channel in Settings. Press START to begin reading. "
             "The VU meter shows input level — aim for -20 to -6 dBFS.</p>"
             "<br>"
-            "<h3 style='color:#dcdcdc;'>Duplicate Timecodes</h3>"
-            "<p style='color:#aaa; font-size:12px;'>"
+            f"<h3 style='color:{h_color};'>Duplicate Timecodes</h3>"
+            f"<p style='color:{muted_color}; font-size:12px;'>"
             "Cues with identical timecodes are marked with a "
-            "<span style='color:#e6c840;'>&#9888;</span> warning. "
+            f"<span style='color:{warn_color};'>&#9888;</span> warning. "
             "Only the last cue in list order will be active during playback. "
             "Click a duplicate to highlight all siblings.</p>"
         )
@@ -1506,6 +1451,94 @@ th {{
             self._log_file.close()
         event.accept()
 
+class _RecoveryDialog(QDialog):
+    """
+    Restore-from-autosave prompt shown at startup when the previous
+    session ended without an explicit save.  Replaces the
+    platform-default QMessageBox so the dialog matches the dark
+    surface the operator sees everywhere else in the app.
+    """
+
+    def __init__(self, last_show_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore Unsaved Changes")
+        self.setMinimumWidth(440)
+        self.setStyleSheet(
+            f"QDialog {{ background: {theme.BG_APP}; }}"
+            f"QLabel {{ color: {theme.TEXT_PRIMARY}; }}"
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 18)
+        root.setSpacing(14)
+
+        # Tag — small caps, lifted from theme.SEMANTIC_WARNING so the
+        # operator's eye registers "this is a recovery flow" before
+        # they read the body.  Two-line headline + dim explanation
+        # mirror the empty-state placeholder pattern (b7 / e3).
+        tag = QLabel("AUTOSAVE FOUND")
+        tag.setStyleSheet(
+            f"color: {theme.SEMANTIC_WARNING}; font-size: 11px; "
+            "font-weight: 700; letter-spacing: 2px;"
+        )
+        root.addWidget(tag)
+
+        head = QLabel("The previous session ended before saving.")
+        f_head = QFont(); f_head.setPointSize(15); f_head.setBold(True)
+        head.setFont(f_head)
+        head.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
+        head.setWordWrap(True)
+        root.addWidget(head)
+
+        # Show the original file name when we have one — operator sees
+        # exactly which show is being recovered.  Otherwise the second
+        # paragraph is enough context.
+        if last_show_name:
+            sub = QLabel(
+                f"Restore the autosaved cue list for "
+                f"<b>{html.escape(last_show_name)}</b>?"
+            )
+        else:
+            sub = QLabel("Restore the autosaved cue list?")
+        sub.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 12px;")
+        sub.setTextFormat(Qt.TextFormat.RichText)
+        sub.setWordWrap(True)
+        root.addWidget(sub)
+
+        hint = QLabel(
+            "Discarding clears the autosave and starts with a blank show."
+        )
+        hint.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px;")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        # Action row — Discard left/secondary, Restore right/primary
+        # green so the safe-default sits where the eye lands.
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_discard = QPushButton("Discard")
+        btn_discard.setStyleSheet(_secondary_btn_style())
+        btn_discard.setFixedHeight(32)
+        btn_discard.clicked.connect(self.reject)
+        btn_row.addWidget(btn_discard)
+
+        btn_restore = QPushButton("Restore")
+        btn_restore.setStyleSheet(_start_btn_style())
+        btn_restore.setFixedHeight(32)
+        btn_restore.setMinimumWidth(110)
+        btn_restore.setDefault(True)
+        btn_restore.clicked.connect(self.accept)
+        btn_row.addWidget(btn_restore)
+
+        root.addSpacing(4)
+        root.addLayout(btn_row)
+
+    @classmethod
+    def ask(cls, parent, last_show_name: str = "") -> bool:
+        dlg = cls(last_show_name, parent)
+        return dlg.exec() == QDialog.DialogCode.Accepted
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1516,6 +1549,101 @@ def _hline() -> QFrame:
     return f
 
 
+def _dot_sep() -> QLabel:
+    """
+    Middot separator between header items — same shape as the
+    Performance Mode and Web Remote status bars (A3).  A typographic
+    rest between groups, not a vertical bar that visually competes
+    with the timecode digits.
+    """
+    s = QLabel("·")
+    s.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 22px;")
+    return s
+
+
+def _logo_pixmap(color_hex: str, size: int) -> QPixmap:
+    """
+    Load assets/logo_src.png, recolour every non-transparent pixel to
+    `color_hex`, and scale to `size × size`.  CompositionMode_SourceIn
+    keeps the glyph silhouette and replaces its colour — the studio
+    Ø is orange in the source file but lives on a dark header here,
+    so it has to retint at runtime.
+
+    Path resolution handles both modes:
+      * dev / `python3 main.py` from a checkout: the file lives at
+        ``<repo>/assets/logo_src.png`` next to the source tree.
+      * PyInstaller frozen bundle (.app / .exe): the spec bundles
+        ``assets/logo_src.png`` into ``sys._MEIPASS/assets/...``;
+        ``sys.frozen`` flips True at runtime so we know to look
+        there instead of relative to ``__file__`` (which points
+        inside the bootloader's temp tree).
+    """
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    else:
+        # ui/main_window.py → ui/ → repo root.
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src_path = os.path.join(base, "assets", "logo_src.png")
+    src = QPixmap(src_path)
+    if src.isNull():
+        return QPixmap()
+    # Render at 2× then downscale so HiDPI displays still get crisp
+    # edges; PyQt picks up the high-res variant via QPixmap automatic
+    # devicePixelRatio handling.
+    scaled = src.scaled(
+        size * 2, size * 2,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    out = QPixmap(scaled.size())
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.drawPixmap(0, 0, scaled)
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    p.fillRect(out.rect(), QColor(color_hex))
+    p.end()
+    return out
+
+
+class BrandMark(QWidget):
+    """
+    Studio Ø glyph (recoloured from assets/logo_src.png) followed by
+    the product name and version.  One reusable widget so the same
+    brand block can land in the header, the About dialog, the PDF
+    cover, etc. without each surface re-implementing the typography.
+
+    Tokens:
+      mark        theme.BRAND_MARK_COLOR / BRAND_MARK_SIZE
+      product     theme.TEXT_BRIGHT (semibold, tracked)
+      version     theme.TEXT_MUTED  (regular)
+    """
+
+    def __init__(self, product: str = "CUE MONITOR", version: str = VERSION,
+                 parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        mark = QLabel()
+        mark.setFixedSize(theme.BRAND_MARK_SIZE, theme.BRAND_MARK_SIZE)
+        mark.setPixmap(_logo_pixmap(theme.BRAND_MARK_COLOR, theme.BRAND_MARK_SIZE))
+        mark.setScaledContents(True)
+        lay.addWidget(mark, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        name = QLabel(product)
+        name.setFont(sans_font(13, bold=False))
+        name.setStyleSheet(
+            f"color: {theme.TEXT_BRIGHT}; font-weight: 600; letter-spacing: 1.5px;"
+        )
+        lay.addWidget(name, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        ver = QLabel(version)
+        ver.setFont(sans_font(11, bold=False))
+        ver.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+        lay.addWidget(ver, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+
 def _vline() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.Shape.VLine)
@@ -1524,50 +1652,58 @@ def _vline() -> QFrame:
 
 
 def _start_btn_style() -> str:
+    """Primary action — show is armed, ready to GO."""
     return (
-        f"QPushButton {{ background: {QColor(48,125,75).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {QColor(58,152,92).name()}; }}"
+        f"QPushButton {{ background: {theme.ACTION_PRIMARY}; "
+        f"color: white; font-weight: 700; letter-spacing: 1px; "
+        f"border: none; border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 14px; }}"
+        f"QPushButton:hover {{ background: {theme.ACTION_PRIMARY_HOVER}; }}"
     )
 
 
 def _stop_btn_style() -> str:
+    """START in its 'running' state — pressing again stops the show."""
     return (
-        f"QPushButton {{ background: {QColor(155,48,48).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {ACCENT_RED.name()}; }}"
+        f"QPushButton {{ background: {theme.SEMANTIC_DANGER}; "
+        f"color: white; font-weight: 700; letter-spacing: 1px; "
+        f"border: none; border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 14px; }}"
+        f"QPushButton:hover {{ background: #ED5A5F; }}"
     )
 
 
-def _perf_btn_style() -> str:
+def _secondary_btn_style() -> str:
+    """
+    Edit Cues / Remote / Performance — quieter than START so the
+    eye lands on the primary action first.  Uses BG_RAISED so the
+    button still reads as a control on the very dark footer, and
+    flips to an info-blue accent when checkable buttons are toggled
+    on (Remote streaming / Edit Mode active).
+    """
     return (
-        f"QPushButton {{ background: {QColor(48,75,135).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {QColor(58,92,165).name()}; }}"
+        f"QPushButton {{ background: {theme.BG_RAISED}; "
+        f"color: {theme.TEXT_PRIMARY}; font-weight: 600; "
+        f"border: 1px solid {theme.BORDER}; "
+        f"border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 12px; }}"
+        f"QPushButton:hover {{ background: #2e2e2e; "
+        f"border-color: {theme.BORDER_STRONG}; }}"
+        f"QPushButton:checked {{ background: rgba(122, 183, 255, 0.14); "
+        f"color: {theme.SEMANTIC_INFO}; "
+        f"border-color: {theme.SEMANTIC_INFO}; }}"
+        f"QPushButton:checked:hover {{ background: rgba(122, 183, 255, 0.22); }}"
     )
 
 
-def _pdf_color_hex(name: str) -> str:
-    mapping = {
-        "red": "#af3030",
-        "dark red": "#781919",
-        "orange": "#c36926",
-        "amber": "#d2a01e",
-        "yellow": "#af9b26",
-        "lime": "#5fb42d",
-        "green": "#309b4b",
-        "dark green": "#1e6432",
-        "teal": "#268c82",
-        "cyan": "#30a5af",
-        "sky": "#4691d2",
-        "blue": "#305faf",
-        "dark blue": "#233782",
-        "indigo": "#4b37a0",
-        "purple": "#7d37af",
-        "magenta": "#a5328c",
-        "pink": "#c35f9b",
-        "rose": "#be465a",
-        "white": "#c8c8c8",
-        "grey": "#6e6e6e",
-    }
-    return mapping.get(name.lower().strip(), "#9a9a9a")
+def _help_btn_style() -> str:
+    """Tiny pill on the very left of the footer — quiet by default."""
+    return (
+        f"QPushButton {{ background: transparent; color: {theme.TEXT_DIM}; "
+        f"border: 1px solid {theme.BORDER}; "
+        f"border-radius: 14px; font-weight: bold; font-size: 13px; }}"
+        f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; "
+        f"border-color: {theme.BORDER_STRONG}; }}"
+    )
+
+

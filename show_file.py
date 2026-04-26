@@ -25,6 +25,12 @@ class ShowSettings:
     # Operators (global list)
     operator_names: List[str] = dc_field(default_factory=lambda: ["Operator 1"])
 
+    # Per-operator colour overrides ({name: "#rrggbb"}). Empty by
+    # default — render call sites resolve unknown roles via
+    # ui.theme.operator_color() (alias map + stable fallback cycle),
+    # so older .ojeshow files keep rendering with sensible colours.
+    operator_colors: Dict[str, str] = dc_field(default_factory=dict)
+
     # Web remote
     remote_password: str = ""
 
@@ -70,6 +76,7 @@ class ShowFile:
                 "audio_channel": self.settings.audio_channel,
                 "logo_path": self.settings.logo_path,
                 "operator_names": self.settings.operator_names,
+                "operator_colors": self.settings.operator_colors,
                 "remote_password": self.settings.remote_password,
                 "perf_cue_name_size": self.settings.perf_cue_name_size,
                 "perf_cue_desc_size": self.settings.perf_cue_desc_size,
@@ -109,6 +116,7 @@ class ShowFile:
             audio_channel=s.get("audio_channel", 0),
             logo_path=s.get("logo_path", ""),
             operator_names=s.get("operator_names", ["Operator 1"]),
+            operator_colors=dict(s.get("operator_colors", {})),
             remote_password=s.get("remote_password", ""),
             perf_cue_name_size=s.get("perf_cue_name_size", 56),
             perf_cue_desc_size=s.get("perf_cue_desc_size", 26),

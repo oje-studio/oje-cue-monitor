@@ -13,6 +13,8 @@ from typing import Optional, List, Dict, Set
 
 from aiohttp import web
 
+from ui.theme import to_css_vars
+
 logger = logging.getLogger(__name__)
 
 AUTH_COOKIE = "oje_remote_auth"
@@ -64,8 +66,14 @@ class WebRemoteServer:
         self._clients: Set[web.WebSocketResponse] = set()
         self._running = False
         self._operator_names: List[str] = []
+        self._operator_colors: Dict[str, str] = {}
         self._remote_password: str = ""
         self._current_state: Dict = {
+            "fps": 25.0,
+            "db": -120.0,
+            "signal_ok": False,
+            "running": False,
+            "signal_warning": "",
             "current_cue": None,
             "next_cue": None,
             "countdown": None,
@@ -80,6 +88,12 @@ class WebRemoteServer:
 
     def set_operators(self, names: List[str]):
         self._operator_names = names
+
+    def set_operator_colors(self, colors: Dict[str, str]):
+        """Per-operator colour overrides ({role: '#rrggbb'}).  Empty
+        is fine — the renderer falls back to ui.theme.operator_color()
+        for any role not in the map."""
+        self._operator_colors = dict(colors or {})
 
     def set_remote_password(self, password: str):
         self._remote_password = password or ""
@@ -102,7 +116,10 @@ class WebRemoteServer:
             self._thread = None
 
     def broadcast_state(self, current_cue, next_cue, countdown: Optional[float],
-                        timecode: str, current_group: str = "", next_group: str = ""):
+                        timecode: str, current_group: str = "", next_group: str = "",
+                        fps: float = 25.0, db: float = -120.0,
+                        signal_ok: bool = False, running: bool = False,
+                        signal_warning: str = ""):
         state = {
             "current_cue": _cue_to_dict(current_cue),
             "next_cue": _cue_to_dict(next_cue),
@@ -110,6 +127,13 @@ class WebRemoteServer:
             "timecode": timecode,
             "current_group": current_group,
             "next_group": next_group,
+            # Mirror what the operator sees on the Mac's Performance bar so
+            # the web view can show the same status at a glance.
+            "fps": float(fps),
+            "db": float(db),
+            "signal_ok": bool(signal_ok),
+            "running": bool(running),
+            "signal_warning": str(signal_warning or ""),
         }
         self._current_state = state
 
@@ -153,12 +177,28 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        operator = request.cookies.get(OP_COOKIE, "")
+        # Operator filter source — depends on whether a password is set:
+        #   * Password mode: render with operator empty AND authenticated
+        #     forced to false. Every reload shows the password+operator
+        #     form so the operator can switch identity by hitting
+        #     reload — they wanted "reload = re-pick".
+        #     /ws and /api/state still gate by the auth cookie that /auth
+        #     installed, so the connection itself stays trusted; the
+        #     in-page UI just always asks again.
+        #   * No-password mode: same idea — operator empty, JS shows the
+        #     picker on every load.
+        if self._remote_password:
+            authenticated_for_render = False
+            operator = ""
+        else:
+            authenticated_for_render = True
+            operator = ""
         html = _render_page(
-            operator if operator in self._operator_names else "",
+            operator,
             self._operator_names,
+            self._operator_colors,
             self.base_url,
-            authenticated=self._is_authenticated(request),
+            authenticated=authenticated_for_render,
             password_required=bool(self._remote_password),
         )
         return web.Response(text=html, content_type="text/html")
@@ -209,6 +249,12 @@ class WebRemoteServer:
         return web.json_response(self._current_state)
 
     def _is_authenticated(self, request) -> bool:
+        # No password configured = no auth. The remote loads straight to the
+        # cue list, no login overlay — this matches the pre-Codex behaviour
+        # operators were used to. Set a remote password in Settings to gate
+        # access (the login form is then enforced).
+        if not self._remote_password:
+            return True
         return request.cookies.get(AUTH_COOKIE) == "1"
 
 
@@ -229,6 +275,7 @@ def _cue_to_dict(cue) -> Optional[Dict]:
 def _render_page(
     operator_filter: Optional[str],
     operator_names: List[str],
+    operator_colors: Dict[str, str],
     base_url: str,
     *,
     authenticated: bool,
@@ -237,6 +284,18 @@ def _render_page(
     title = f"ØJE CUE MONITOR — {operator_filter}" if operator_filter else "ØJE CUE MONITOR"
     filter_js = json.dumps(operator_filter) if operator_filter else "null"
     operators_js = json.dumps(operator_names)
+    # Pre-compute the per-operator semantic colour the JS render
+    # functions inject as inline style on each .op-name element.
+    # Override map (from settings) wins; otherwise theme.operator_color
+    # resolves the role through the alias map (Lighting/Audio/StageMgr)
+    # or the stable cycle palette — same precedence as the Mac
+    # PerformanceView._operator_color (d2).
+    from ui import theme as _theme
+    resolved = {}
+    for name in operator_names:
+        resolved[name] = (operator_colors.get(name)
+                          or _theme.operator_color(name, tuple(operator_names)))
+    op_colors_js = json.dumps(resolved)
     authed_js = "true" if authenticated else "false"
     password_required_js = "true" if password_required else "false"
     auth_copy = (
@@ -246,211 +305,314 @@ def _render_page(
         else "Choose operator name and tap ENTER REMOTE to open the live cue view."
     )
     password_placeholder = "Password from the Mac remote window" if password_required else ""
+    css_root = to_css_vars()
 
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>{title}</title>
 <style>
+{css_root}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-html {{
-    height: 100%;
+html, body {{
     background: #000;
+    /* iOS Safari ignores overflow:hidden on body for touch scrolling —
+       the page still rubber-bands left/right/up/down when the finger
+       drags. position:fixed + inset:0 + overscroll-behavior:none locks
+       it down properly. Anything that needs to scroll (.main) does so
+       inside its own box, not by moving the whole page. */
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    /* Block accidental two-finger zoom / pinch on the chrome but allow
+       inner scroll regions to handle their own gestures. */
+    touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;
 }}
 body {{
-    background: #000;
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-    min-height: 100vh;
-    min-height: 100svh;
-    min-height: 100dvh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    /* svh = "smallest viewport height" — the slice of screen that's
+       always visible, even when iOS Safari's toolbar is up. Using it
+       guarantees the bottom strip never lands under the URL bar. */
+    height: 100vh;
+    height: 100svh;
+    /* Three-row grid: top status bar, flexible main, bottom strip.
+       No flex-shifting when cue text changes length between updates. */
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 100%;
+    /* Honour notch / home-indicator. Padding lives inside the box-sizing
+       so we never exceed 100 % width and never trigger horizontal scroll. */
     padding-top: env(safe-area-inset-top, 0px);
     padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     padding-left: env(safe-area-inset-left, 0px);
 }}
-.header {{
-    background: #0a0a0a;
-    padding: 8px 20px;
+
+/* ── Top status bar (mirrors Performance Mode) ──────────────────────────── */
+.statusbar {{
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 10px 20px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid #1a1a1a;
-    gap: 12px;
-    flex-shrink: 0;
-}}
-.header-left,
-.header-right {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-}}
-.header .tc {{
-    font-family: 'Menlo', 'Courier New', monospace;
-    font-size: 14px;
-    color: #333;
-    flex: 1;
-    text-align: center;
-    min-width: 0;
-}}
-.header .clock {{
-    font-family: 'Menlo', monospace;
-    font-size: 13px;
-    color: #444;
-}}
-.header .title {{
-    font-size: 11px;
-    color: #444;
-    font-weight: bold;
-    letter-spacing: 2px;
-}}
-.main {{
-    flex: 1;
-    display: flex;
-    flex-direction: column;
     justify-content: center;
-    padding: 24px 32px;
-    gap: 16px;
-    min-height: 0;
+    gap: 12px;
+    flex-wrap: nowrap;
+    min-height: 54px;
+    overflow: hidden;
+    /* Single rule for every text item in the bar — same font, weight,
+       size and letter-spacing across TC / FPS / state / dB / clock so
+       the row looks rhythmic instead of mismatched. Each item still
+       has its own colour via its specific class below. */
+    font-family: 'Menlo', 'SF Mono', 'Courier New', monospace;
+    font-size: clamp(16px, 4vw, 22px);
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}}
+.statusbar > * {{ white-space: nowrap; }}
+.statusbar .dot {{
+    color: var(--danger);
+    line-height: 1;
+}}
+.statusbar .dot.ok {{ color: var(--success); }}
+.statusbar .tc {{
+    color: var(--text-primary);
+    /* Reserve max width for HH:MM:SS so the bar doesn't reflow when
+       the value goes from "--:--:--" to "10:00:00". (Frames stripped
+       client-side for smoother updates — see trimTC.) */
+    min-width: 8ch;
+    text-align: center;
+}}
+.statusbar .meta {{ color: var(--text-muted); }}
+.statusbar .clock {{
+    color: var(--text-primary);
+    min-width: 8ch;
+    text-align: center;
+}}
+.statusbar .sep {{ color: var(--text-dim); opacity: 0.7; }}
+
+/* ── 5-bar VU meter (CSS only, mirrors the Mac one) ─────────────────────── */
+.vu {{
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 18px;
+}}
+/* VU "lit" slots use the same semantic palette as the rest of the
+   app (success green, warning amber, danger red).  Unlit slots are
+   dim members of the same hue family. */
+.vu .bar {{
+    width: 10px;
+    height: 100%;
+    border-radius: 1px;
+    background: rgba(54, 179, 126, 0.12);   /* dim success */
+}}
+.vu .bar:nth-child(4) {{ background: rgba(245, 165, 36, 0.12); }}  /* dim warning */
+.vu .bar:nth-child(5) {{ background: rgba(229, 72, 77, 0.12); }}   /* dim danger */
+.vu .bar.lit:nth-child(-n+3) {{ background: var(--success); }}
+.vu .bar.lit:nth-child(4)    {{ background: var(--warning); }}
+.vu .bar.lit:nth-child(5)    {{ background: var(--danger); }}
+
+/* ── Main current-cue area — fills remaining height ──────────────────────── */
+.main {{
+    background: var(--bg-app);
+    padding: 22px clamp(20px, 6vw, 64px);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+}}
+.tag-row {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-dim);
 }}
 .tag {{
     font-size: 11px;
-    color: #4a4a4a;
-    font-weight: bold;
+    font-weight: 600;
     letter-spacing: 3px;
-    margin-bottom: 4px;
 }}
 .group {{
-    color: #7a7acd;
-    font-size: 13px;
-    font-weight: bold;
-    margin-left: 12px;
+    color: var(--info);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
 }}
 .cue-name {{
-    font-size: clamp(28px, 8vw, 64px);
-    font-weight: bold;
-    line-height: 1.1;
-    margin-bottom: 8px;
+    /* clamp lets it scale on phones (28px) up to a reasonable 64 on a
+       laptop without rampaging on a 4 K display. */
+    font-size: clamp(28px, 7vw, 64px);
+    font-weight: 800;
+    line-height: 1.05;
+    color: var(--text-bright);
 }}
 .cue-desc {{
-    font-size: clamp(14px, 3vw, 26px);
-    color: #999;
-    margin-bottom: 16px;
+    font-size: clamp(14px, 2.6vw, 22px);
+    color: var(--text-muted);
+    line-height: 1.35;
+}}
+/* Shown only when state.current_cue is null — same intent as the
+   cue-table empty placeholder (b7) on the desktop, just sized
+   for a phone.  Tone-on-tone, no border, lives in the same flex
+   column so the page doesn't reflow when the first cue arrives. */
+.empty-state {{
+    margin-top: 12px;
+    padding: 32px 0;
+    text-align: center;
+}}
+.empty-state .empty-head {{
+    font-size: clamp(16px, 3.4vw, 22px);
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}}
+.empty-state .empty-sub {{
+    font-size: clamp(12px, 2.2vw, 14px);
+    color: var(--text-dim);
+    margin-top: 4px;
 }}
 .operators {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
+    display: grid;
+    /* auto-fit so 1/2/3+ operators tile naturally; minmax keeps each
+       card readable on phone. */
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+    margin-top: 4px;
 }}
 .op-card {{
-    background: #111118;
-    border-radius: 8px;
-    padding: 12px 16px;
-    flex: 1;
-    min-width: 150px;
-}}
-.op-card.solo {{
-    min-width: 100%;
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
+    border: 1px solid var(--border);
 }}
 .op-name {{
-    font-size: 11px;
-    color: #7a7acd;
-    font-weight: bold;
-    letter-spacing: 1px;
+    /* Per-operator semantic colour comes from inline style="color:..."
+       set by renderOps() — Lighting blue, Audio amber, Stage Manager
+       purple, etc.  This rule sets everything BUT the colour. */
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
     margin-bottom: 4px;
 }}
 .op-comment {{
-    font-size: clamp(16px, 4vw, 28px);
-    color: #e6c840;
+    font-size: clamp(15px, 3vw, 22px);
+    color: var(--text-bright);
     word-wrap: break-word;
     white-space: pre-wrap;
+    line-height: 1.35;
 }}
-.divider {{
-    border-top: 1px solid #222;
-    margin: 8px 0;
-}}
-.next-section {{
-    padding: 20px 32px;
-    background: #050505;
-    border-top: 2px solid #1a1a1a;
-    flex-shrink: 0;
-}}
-.next-row {{
-    display: flex;
+
+/* ── Bottom: Next cue strip ──────────────────────────────────────────────── */
+.next-strip {{
+    background: var(--bg-header);
+    border-top: 1px solid var(--border-subtle);
+    padding: 16px clamp(20px, 5vw, 40px);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 16px;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
+    /* Reserve a stable height (so the main area doesn't grow when the
+       show ends) AND cap it (so unusually long content can never push
+       its own tail under iOS Safari's bottom chrome). */
+    min-height: 78px;
+    max-height: 30vh;
+    overflow: hidden;
+}}
+.next-info {{ min-width: 0; }}
+.next-tag {{
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 600;
+    letter-spacing: 2px;
+    margin-bottom: 2px;
 }}
 .next-name {{
-    font-size: clamp(18px, 4vw, 32px);
-    font-weight: bold;
-    color: #ccc;
+    font-size: clamp(16px, 3.6vw, 26px);
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 .next-desc {{
-    font-size: clamp(12px, 2.5vw, 18px);
-    color: #555;
+    font-size: clamp(11px, 2vw, 15px);
+    color: var(--text-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }}
 .countdown {{
     font-family: 'Menlo', monospace;
-    font-size: clamp(24px, 6vw, 48px);
-    font-weight: bold;
-    color: #fff;
+    font-size: clamp(24px, 5.5vw, 40px);
+    font-weight: 800;
+    color: var(--text-bright);
+    letter-spacing: 0.5px;
+    /* Reserve enough width for "in MM:SS" so layout doesn't twitch
+       when countdown changes from 9 to 10 seconds. */
+    min-width: 7ch;
+    text-align: right;
 }}
-.countdown.urgent {{
-    color: #dc4040;
-}}
+.countdown.urgent {{ color: var(--danger); }}
 .next-ops {{
+    grid-column: 1 / -1;
     display: flex;
-    gap: 16px;
-    margin-top: 8px;
     flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
 }}
 .next-op {{
-    font-size: 14px;
-    color: #e6c840;
-    font-style: italic;
+    font-size: clamp(11px, 2.2vw, 14px);
+    color: var(--text-bright);
+    font-style: normal;
     white-space: pre-wrap;
 }}
-.hidden {{ display: none; }}
+.next-op-name {{
+    /* Per-operator semantic colour set inline by renderNextOps. */
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}}
+.hidden {{ display: none !important; }}
 .overlay {{
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.94);
+    background: var(--bg-app);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    padding: 24px;
-    padding-top: max(24px, env(safe-area-inset-top, 0px));
-    padding-right: max(24px, env(safe-area-inset-right, 0px));
-    padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
-    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding: var(--space-6);
+    padding-top: max(var(--space-6), env(safe-area-inset-top, 0px));
+    padding-right: max(var(--space-6), env(safe-area-inset-right, 0px));
+    padding-bottom: max(var(--space-6), env(safe-area-inset-bottom, 0px));
+    padding-left: max(var(--space-6), env(safe-area-inset-left, 0px));
 }}
 .auth-card {{
     width: min(420px, 100%);
-    background: #111;
-    border: 1px solid #2d2d2d;
-    border-radius: 12px;
-    padding: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
 }}
 .auth-title {{
     font-size: 18px;
-    font-weight: bold;
-    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-3);
 }}
 .auth-copy {{
     font-size: 13px;
-    color: #9a9a9a;
+    color: var(--text-muted);
     margin-bottom: 18px;
     line-height: 1.4;
 }}
@@ -460,20 +622,27 @@ body {{
 .field label {{
     display: block;
     font-size: 11px;
-    color: #7a7a7a;
-    font-weight: bold;
+    color: var(--text-dim);
+    font-weight: 600;
     letter-spacing: 2px;
-    margin-bottom: 6px;
+    margin-bottom: var(--space-2);
 }}
 .field select,
 .field input {{
     width: 100%;
-    border: 1px solid #333;
-    border-radius: 8px;
-    background: #050505;
-    color: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-input);
+    color: var(--text-primary);
     padding: 12px 14px;
     font-size: 15px;
+    -webkit-appearance: none;  /* iOS gradient → flat */
+    appearance: none;
+}}
+.field select:focus,
+.field input:focus {{
+    outline: none;
+    border-color: var(--info);
 }}
 .actions {{
     display: flex;
@@ -482,19 +651,27 @@ body {{
 }}
 .primary-btn,
 .ghost-btn {{
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
     font-size: 14px;
-    color: #fff;
-    background: #1b1b1b;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-bright);
+    background: var(--bg-raised);
+    -webkit-appearance: none;
+    appearance: none;
 }}
 .primary-btn {{
-    background: #2b5ea7;
-    border-color: #2b5ea7;
+    background: var(--action);
+    border-color: var(--action);
+    color: #0a1a10;  /* dark green-ink for contrast on bright green */
+}}
+.primary-btn:active {{
+    background: var(--action-hover);
 }}
 .error {{
-    color: #ff7d7d;
+    color: var(--danger);
     font-size: 12px;
     min-height: 18px;
 }}
@@ -506,83 +683,56 @@ body {{
     padding: 4px 10px;
     font-size: 11px;
 }}
+/* Access button removed — switching operator is done via reload
+   (no-password mode shows the picker every reload; password mode
+   re-prompts the form). The .hidden helper still suppresses any
+   stray buttons that carry the legacy class. */
+.access-pill {{ display: none; }}
 .connection-lost {{
     position: fixed;
     top: env(safe-area-inset-top, 0px); left: 0; right: 0;
-    background: #a03030;
-    color: white;
+    background: var(--danger);
+    color: var(--text-bright);
     text-align: center;
-    padding: 6px;
+    padding: var(--space-3);
     font-size: 12px;
-    font-weight: bold;
+    font-weight: 600;
+    letter-spacing: 1px;
     z-index: 999;
 }}
-@media (max-width: 700px) {{
-    body {{
-        overflow: auto;
+/* Phone-specific tweaks. The base layout is already mobile-first via
+   clamp() and grid auto-fit, this just trims spacing on small screens. */
+@media (max-width: 600px) {{
+    .statusbar {{
+        padding: 8px 10px;
+        gap: 6px;
+        min-height: 44px;
+        font-size: 14px;     /* uniform shrink for every text item */
     }}
-    .header {{
-        padding: 8px 12px;
+    .statusbar .sep,
+    .statusbar #fps,
+    .statusbar #signal-db {{
+        display: none;       /* keep TC + state + VU + clock — drop FPS, dB text, separators */
     }}
-    .header-left,
-    .header-right {{
-        gap: 8px;
-    }}
-    .header .title,
-    .header .clock {{
-        display: none;
-    }}
-    .header .tc {{
-        text-align: right;
-        font-size: 13px;
-    }}
-    .mini-btn {{
-        padding: 4px 8px;
-    }}
+    .statusbar .tc {{ min-width: 0; }}
+    .statusbar .clock {{ min-width: 0; }}
+    .vu {{ height: 14px; gap: 1px; }}
+    .vu .bar {{ width: 7px; }}
     .main {{
-        justify-content: flex-start;
-        padding: 18px 16px;
-        gap: 12px;
-    }}
-    .cue-name {{
-        font-size: clamp(24px, 9vw, 40px);
-    }}
-    .cue-desc {{
-        font-size: clamp(14px, 4.2vw, 20px);
-        margin-bottom: 10px;
-    }}
-    .operators {{
-        gap: 10px;
-    }}
-    .op-card {{
-        min-width: 100%;
-        padding: 10px 12px;
-    }}
-    .op-comment {{
-        font-size: clamp(16px, 5.2vw, 24px);
-    }}
-    .next-section {{
-        padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
-    }}
-    .next-row {{
-        align-items: flex-start;
-        gap: 12px;
-    }}
-    .next-name {{
-        font-size: clamp(18px, 5vw, 26px);
-    }}
-    .next-desc {{
-        font-size: clamp(12px, 3.6vw, 16px);
-    }}
-    .countdown {{
-        font-size: clamp(22px, 8vw, 34px);
-    }}
-    .next-ops {{
+        padding: 16px;
         gap: 8px;
-        margin-top: 6px;
     }}
-    .next-op {{
-        font-size: 13px;
+    .next-strip {{
+        padding: 10px 14px;
+        min-height: 60px;
+    }}
+    /* On phones, hide the next-cue operator notes — they push the
+       strip beyond the bottom safe area when several operators have
+       long comments. The operator looks at notes for the *current*
+       cue; for "next" the name + countdown is enough preview. */
+    .next-ops {{ display: none; }}
+    .operators {{
+        grid-template-columns: 1fr;     /* one card per row on phone */
     }}
 }}
 </style>
@@ -599,116 +749,278 @@ body {{
         </div>
         <div class="field" id="password-field">
             <label for="password-input">PASSWORD</label>
-            <input id="password-input" type="password" autocomplete="current-password" placeholder="{password_placeholder}">
+            <input id="password-input" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="{password_placeholder}">
         </div>
         <div id="auth-error" class="error"></div>
         <div class="actions">
-            <button id="auth-submit" class="primary-btn" type="button">ENTER REMOTE</button>
+            <button id="auth-submit" class="primary-btn" type="submit">ENTER REMOTE</button>
         </div>
     </form>
 </div>
 
-<div class="header">
-    <div class="header-left">
-        <span class="title">{title.upper()}</span>
-        <button id="access-btn" class="mini-btn" type="button">Access</button>
-    </div>
-    <span class="tc" id="timecode">--:--:--:--</span>
-    <div class="header-right">
-        <span class="clock" id="clock"></span>
-    </div>
+<!-- Top status bar — same shape as the Performance Mode header. -->
+<div class="statusbar">
+    <span class="dot" id="signal-dot">●</span>
+    <span class="tc" id="timecode">--:--:--</span>
+    <span class="sep">·</span>
+    <span class="meta" id="fps">FPS --</span>
+    <span class="sep">·</span>
+    <span class="meta" id="signal-state">NO SIGNAL</span>
+    <span class="sep">·</span>
+    <span class="vu" id="vu" aria-label="Audio level">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+    </span>
+    <span class="meta" id="signal-db">−∞ dB</span>
+    <span class="sep">·</span>
+    <span class="clock" id="clock">--:--:--</span>
 </div>
+<!-- (Access button removed — the operator switches identity by reloading
+     the page; see initAuth handling.) -->
 
-<div class="main" id="current-section">
-    <div>
+<!-- Current cue — owns the flexible row. -->
+<div class="main">
+    <div class="tag-row" id="cur-tag-row">
         <span class="tag">CURRENT CUE</span>
         <span class="group" id="cur-group"></span>
     </div>
     <div class="cue-name" id="cur-name">—</div>
     <div class="cue-desc" id="cur-desc"></div>
     <div class="operators" id="cur-ops"></div>
+    <div class="empty-state hidden" id="cur-empty">
+        <div class="empty-head">Waiting for the show</div>
+        <div class="empty-sub">The current cue will appear here once LTC starts.</div>
+    </div>
 </div>
 
-<div class="next-section">
-    <div class="next-row">
-        <div>
-            <span class="tag">NEXT</span>
-            <span class="group" id="next-group"></span>
-        </div>
-        <div class="countdown" id="countdown"></div>
+<!-- Next cue strip — pinned to bottom, fixed minimum height. -->
+<div class="next-strip">
+    <div class="next-info">
+        <div class="next-tag">NEXT &nbsp;<span class="group" id="next-group"></span></div>
+        <div class="next-name" id="next-name">—</div>
+        <div class="next-desc" id="next-desc"></div>
     </div>
-    <div class="next-name" id="next-name">—</div>
-    <div class="next-desc" id="next-desc"></div>
+    <div class="countdown" id="countdown"></div>
     <div class="next-ops" id="next-ops"></div>
 </div>
 
 <script>
 const OPERATOR_FILTER = {filter_js};
 const OPERATOR_NAMES = {operators_js};
+const OPERATOR_COLORS = {op_colors_js};
 const AUTHENTICATED = {authed_js};
 const PASSWORD_REQUIRED = {password_required_js};
 let ws;
 let reconnectTimer;
 let currentOperator = OPERATOR_FILTER;
 
+let pollTimer;
+
+function fetchState() {{
+    return fetch('/api/state', {{ credentials: 'include', cache: 'no-store' }})
+        .then(r => r.ok ? r.json() : null)
+        .then(s => {{ if (s) render(s); return s; }})
+        .catch(() => null);
+}}
+
+function startPolling() {{
+    if (pollTimer) return;
+    // 4 Hz — fast enough that the timecode digits don't visibly stutter
+    // when we're falling back to HTTP polling. Server only does work
+    // serialising the small state dict (it's a couple of hundred bytes
+    // and we already keep it in memory), so 4 Hz on the local network
+    // is cheap. WS path is still preferred.
+    pollTimer = setInterval(fetchState, 250);
+}}
+
+function stopPolling() {{
+    if (pollTimer) {{ clearInterval(pollTimer); pollTimer = null; }}
+}}
+
 function connect() {{
+    // Pull state immediately via HTTP so the cards populate even if the
+    // WebSocket handshake is slow (or the very first WS frame slips
+    // through, which we occasionally see on iOS Safari).
+    fetchState();
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws');
 
+    // Fallback poller: if the WS isn't open within 3 s, start polling
+    // /api/state every second so the UI keeps updating regardless.
+    const wsOpenWatchdog = setTimeout(() => {{
+        if (!ws || ws.readyState !== WebSocket.OPEN) startPolling();
+    }}, 3000);
+
     ws.onopen = () => {{
+        clearTimeout(wsOpenWatchdog);
+        stopPolling();
         document.getElementById('conn-banner').classList.add('hidden');
+        // One more belt-and-suspenders fetch on open — covers the case
+        // where the server-pushed initial frame raced past Safari's
+        // onmessage assignment.
+        fetchState();
     }};
 
     ws.onmessage = (event) => {{
-        const state = JSON.parse(event.data);
-        render(state);
+        try {{ render(JSON.parse(event.data)); }} catch (_e) {{}}
     }};
 
     ws.onclose = () => {{
+        clearTimeout(wsOpenWatchdog);
         document.getElementById('conn-banner').classList.remove('hidden');
+        startPolling();   // keep state flowing while we wait to reconnect
         reconnectTimer = setTimeout(connect, 2000);
     }};
 
     ws.onerror = () => {{ ws.close(); }};
 }}
 
+// Cheap setText helpers — skip the DOM write when the value is
+// unchanged. On a phone, render() runs ~25× per second when the WS is
+// healthy, so avoiding redundant text/styleSheet writes keeps Safari's
+// layout pipeline from getting backed up and the cards from feeling
+// jittery.
+function setText(id, value) {{
+    const el = document.getElementById(id);
+    if (el && el.textContent !== value) el.textContent = value;
+}}
+function setColor(id, color) {{
+    const el = document.getElementById(id);
+    if (el && el.style.color !== color) el.style.color = color;
+}}
+
+// Caches that stop renderOps / renderNextOps from rebuilding their
+// inner HTML when the cue id and operator-comments dict are unchanged
+// (which is most ticks — the cue only changes occasionally).
+let _curCueSig = '';
+let _nxtCueSig = '';
+let _curOpsSig = '';
+let _nxtOpsSig = '';
+
+// Strip the trailing :FF (frames) from the LTC timecode for the web
+// display. The web view is a reference monitor — operators don't need
+// frame-level precision here, and dropping frames means the timecode
+// label only updates once per second instead of ~25× per second, which
+// is dramatically smoother on iOS Safari (and saves a lot of layout
+// work everywhere).
+function trimTC(tc) {{
+    if (!tc) return '--:--:--';
+    const parts = tc.split(':');
+    return parts.length >= 3 ? parts.slice(0, 3).join(':') : tc;
+}}
+
 function render(state) {{
-    document.getElementById('timecode').textContent = state.timecode || '--:--:--:--';
-    document.getElementById('cur-group').textContent = state.current_group ? '[' + state.current_group + ']' : '';
-    document.getElementById('next-group').textContent = state.next_group ? '[' + state.next_group + ']' : '';
+    setText('timecode', trimTC(state.timecode));
+    setText('cur-group', state.current_group ? '[' + state.current_group + ']' : '');
+    setText('next-group', state.next_group ? '[' + state.next_group + ']' : '');
 
+    // ── Status bar ──
+    const dot = document.getElementById('signal-dot');
+    let dotClass, dotColor, stateText, stateColor;
+    if (!state.running) {{
+        dotClass = 'dot'; dotColor = '#3d3d3d';
+        stateText = 'OFF'; stateColor = '#555';
+    }} else if (state.signal_ok) {{
+        dotClass = 'dot ok'; dotColor = '';
+        stateText = state.signal_warning || 'LIVE';
+        stateColor = state.signal_warning ? '#e6c840' : '#4bc373';
+    }} else {{
+        dotClass = 'dot'; dotColor = '';
+        stateText = 'NO SIGNAL'; stateColor = '#d75a5a';
+    }}
+    if (dot.className !== dotClass) dot.className = dotClass;
+    setColor('signal-dot', dotColor);
+    setText('signal-state', stateText);
+    setColor('signal-state', stateColor);
+
+    // FPS
+    const fps = state.fps;
+    setText('fps', (typeof fps === 'number' && fps > 0)
+        ? 'FPS ' + fps.toFixed(2) : 'FPS --');
+
+    // dB level + 5-bar VU
+    const db = state.db;
+    let dbText, dbColor, lit = 0;
+    if (typeof db === 'number' && db > -120) {{
+        dbText = (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
+        dbColor = db > -3 ? '#d75a5a' : (db > -12 ? '#e6c840' : '#dcdcdc');
+        const norm = Math.max(0, Math.min(1, (db + 60) / 60));
+        lit = Math.round(norm * 5);
+    }} else {{
+        dbText = '−∞ dB';
+        dbColor = '#7a7a7a';
+    }}
+    setText('signal-db', dbText);
+    setColor('signal-db', dbColor);
+    const vuBars = document.querySelectorAll('#vu .bar');
+    vuBars.forEach((b, i) => {{
+        const want = i < lit;
+        if (b.classList.contains('lit') !== want) b.classList.toggle('lit', want);
+    }});
+
+    // ── Current cue ──
     const cur = state.current_cue;
-    if (cur) {{
-        document.getElementById('cur-name').textContent = cur.name || '—';
-        document.getElementById('cur-desc').textContent = cur.description || '';
-        renderOps('cur-ops', cur.operator_comments || {{}});
-    }} else {{
-        document.getElementById('cur-name').textContent = '—';
-        document.getElementById('cur-desc').textContent = '';
-        document.getElementById('cur-ops').innerHTML = '';
+    // Hide the live cue elements + show empty placeholder when there
+    // is no current cue at all — same idea as the cue-table empty
+    // state on the desktop (b7).  Toggling is done via the .hidden
+    // helper class so we keep one source of truth for "off".
+    const curEmpty = !cur;
+    document.getElementById('cur-empty').classList.toggle('hidden', !curEmpty);
+    document.getElementById('cur-tag-row').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-name').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-desc').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-ops').classList.toggle('hidden', curEmpty);
+
+    const curSig = cur ? (cur.id || '') + '|' + (cur.name || '') + '|' + (cur.description || '') : '';
+    if (curSig !== _curCueSig) {{
+        _curCueSig = curSig;
+        setText('cur-name', cur ? (cur.name || '—') : '—');
+        setText('cur-desc', cur ? (cur.description || '') : '');
+    }}
+    const curOpsSig = cur ? JSON.stringify(cur.operator_comments || {{}}) : '';
+    if (curOpsSig !== _curOpsSig) {{
+        _curOpsSig = curOpsSig;
+        renderOps('cur-ops', cur ? (cur.operator_comments || {{}}) : {{}});
     }}
 
+    // ── Next cue ──
     const nxt = state.next_cue;
-    if (nxt) {{
-        document.getElementById('next-name').textContent = nxt.name || '—';
-        document.getElementById('next-desc').textContent = nxt.description || '';
-        renderNextOps(nxt.operator_comments || {{}});
-    }} else {{
-        document.getElementById('next-name').textContent = '—';
-        document.getElementById('next-desc').textContent = '';
-        document.getElementById('next-ops').innerHTML = '';
+    const nxtSig = nxt ? (nxt.id || '') + '|' + (nxt.name || '') + '|' + (nxt.description || '') : '';
+    if (nxtSig !== _nxtCueSig) {{
+        _nxtCueSig = nxtSig;
+        setText('next-name', nxt ? (nxt.name || '—') : '—');
+        setText('next-desc', nxt ? (nxt.description || '') : '');
+    }}
+    const nxtOpsSig = nxt ? JSON.stringify(nxt.operator_comments || {{}}) : '';
+    if (nxtOpsSig !== _nxtOpsSig) {{
+        _nxtOpsSig = nxtOpsSig;
+        renderNextOps(nxt ? (nxt.operator_comments || {{}}) : {{}});
     }}
 
+    // ── Countdown ──
     const cd = state.countdown;
     const cdEl = document.getElementById('countdown');
     if (cd !== null && cd !== undefined) {{
         const m = Math.floor(cd / 60);
         const s = Math.floor(cd % 60);
-        cdEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-        cdEl.className = cd < 10 ? 'countdown urgent' : 'countdown';
-    }} else {{
+        const cdText = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+        if (cdEl.textContent !== cdText) cdEl.textContent = cdText;
+        const want = cd < 10 ? 'countdown urgent' : 'countdown';
+        if (cdEl.className !== want) cdEl.className = want;
+    }} else if (cdEl.textContent !== '') {{
         cdEl.textContent = '';
     }}
+}}
+
+function opColor(name) {{
+    // Per-operator semantic colour resolved by Python (override map
+    // > theme alias > fallback cycle).  Defaults to muted text if
+    // we somehow get a name we didn't pre-resolve.
+    return OPERATOR_COLORS[name] || 'var(--text-muted)';
 }}
 
 function renderOps(containerId, comments) {{
@@ -724,7 +1036,8 @@ function renderOps(containerId, comments) {{
     }} else {{
         for (const [name, comment] of Object.entries(comments)) {{
             if (!comment) continue;
-            el.innerHTML += '<div class="op-card"><div class="op-name">' +
+            el.innerHTML += '<div class="op-card"><div class="op-name" style="color:' +
+                opColor(name) + '">' +
                 escHtml(name) + '</div><div class="op-comment">' +
                 escHtml(comment) + '</div></div>';
         }}
@@ -743,7 +1056,10 @@ function renderNextOps(comments) {{
     }} else {{
         for (const [name, comment] of Object.entries(comments)) {{
             if (!comment) continue;
-            el.innerHTML += '<span class="next-op">' + escHtml(name) + ': ' + escHtml(comment) + '</span>';
+            el.innerHTML += '<span class="next-op">' +
+                '<span class="next-op-name" style="color:' + opColor(name) + '">' +
+                escHtml(name) + ':</span> ' +
+                escHtml(comment) + '</span>';
         }}
     }}
 }}
@@ -777,9 +1093,25 @@ async function submitAuth() {{
     const password = document.getElementById('password-input').value;
     const errorEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('auth-submit');
+    const overlay = document.getElementById('auth-overlay');
+    // Guard against the form firing submit twice (e.g. Enter + click).
+    if (submitBtn.disabled) return;
     errorEl.textContent = '';
-    submitBtn.disabled = true;
 
+    // No-password fast path: there's nothing to authenticate against, so
+    // skip the /auth roundtrip entirely. Apply the operator filter
+    // client-side, hide the overlay, and open the WS if we haven't
+    // already (initAuth defers connect when the picker is shown).
+    if (!PASSWORD_REQUIRED) {{
+        currentOperator = operator || null;
+        overlay.classList.add('hidden');
+        if (!ws || ws.readyState >= WebSocket.CLOSING) {{
+            connect();
+        }}
+        return;
+    }}
+
+    submitBtn.disabled = true;
     try {{
         const resp = await fetch('/auth', {{
             method: 'POST',
@@ -787,13 +1119,21 @@ async function submitAuth() {{
             body: JSON.stringify({{ operator, password }}),
             credentials: 'same-origin',
         }});
-        const data = await resp.json();
+        let data = {{}};
+        try {{ data = await resp.json(); }} catch (_e) {{}}
         if (!resp.ok || !data.ok) {{
             errorEl.textContent = data.error || 'Authentication failed.';
             return;
         }}
         currentOperator = operator || null;
-        location.reload();
+        // /auth set the auth cookie — don't reload (server now always
+        // renders the form in password mode, so a reload would just put
+        // the form back on screen). Hide the overlay and open the WS;
+        // the cookie is sent with the WS request, server lets us in.
+        overlay.classList.add('hidden');
+        if (!ws || ws.readyState >= WebSocket.CLOSING) {{
+            connect();
+        }}
     }} catch (_err) {{
         errorEl.textContent = 'Could not reach the remote server.';
     }} finally {{
@@ -809,6 +1149,14 @@ function initAuth() {{
     const authForm = document.getElementById('auth-form');
     const authSubmit = document.getElementById('auth-submit');
     document.getElementById('password-field').classList.toggle('hidden', !PASSWORD_REQUIRED);
+
+    // Three paths to submitAuth, all guarded by the submitBtn.disabled
+    // double-submit lock so they can't fire twice on the same gesture:
+    //   - form submit  → covers Enter inside any text field
+    //   - button click → covers tap on iOS where form-implicit-submit
+    //                    with only a <select> + hidden input is unreliable
+    //   - select keydown Enter → some Safari versions don't bubble
+    //                            keydown on a <select> to the form
     authForm.addEventListener('submit', (event) => {{
         event.preventDefault();
         submitAuth();
@@ -817,22 +1165,15 @@ function initAuth() {{
         event.preventDefault();
         submitAuth();
     }});
-    document.getElementById('access-btn').addEventListener('click', () => {{
-        document.getElementById('auth-error').textContent = '';
-        overlay.classList.remove('hidden');
-        if (!PASSWORD_REQUIRED) {{
-            passwordInput.value = '';
-            operatorSelect.focus();
-        }} else {{
-            passwordInput.focus();
-        }}
-    }});
-    document.addEventListener('keydown', (event) => {{
-        if (!overlay.classList.contains('hidden') && event.key === 'Enter') {{
+    operatorSelect.addEventListener('keydown', (event) => {{
+        if (event.key === 'Enter' || event.keyCode === 13) {{
             event.preventDefault();
             submitAuth();
         }}
     }});
+
+    // (Access button removed — operator switches by reloading.)
+
     operatorSelect.addEventListener('change', () => {{
         document.getElementById('auth-error').textContent = '';
     }});
@@ -848,6 +1189,20 @@ function initAuth() {{
             operatorSelect.focus();
         }}
         return false;
+    }}
+
+    // Authenticated path:
+    //   * Password mode: /auth has already happened — don't ask again on
+    //     reload, even if the operator field was left as "All Operators".
+    //     Re-showing the picker here would create a loop, because
+    //     submitAuth in password mode requires a password the user
+    //     no longer has on screen.
+    //   * No-password mode: ask for operator on every reload. submitAuth
+    //     takes the no-password fast path (no /auth, no password needed).
+    if (!OPERATOR_FILTER && !PASSWORD_REQUIRED) {{
+        overlay.classList.remove('hidden');
+        operatorSelect.focus();
+        return false;     // wait for ENTER REMOTE → submitAuth → connect()
     }}
     overlay.classList.add('hidden');
     return true;

@@ -9,45 +9,64 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QRect
 from PyQt6.QtGui import QColor, QFont, QBrush, QPainter, QPixmap, QIcon
 
-from cue_engine import Cue
+from cue_engine import Cue, find_duplicate_rows
 from ui.fonts import mono_font
+from ui import theme
 from typing import List, Optional, Tuple, Dict
 
-C_CURRENT    = QColor(55, 130, 55)
-C_PAST_BG    = QColor(50, 50, 50)
 C_FUTURE_BG  = QColor(38, 38, 38)
-C_DIVIDER_BG = QColor(20, 20, 38)
-C_TEXT_DIM   = QColor(105, 105, 105)
+# Past rows: a hair-thin 3 % white lift over the future-row bg.
+# Pre-computed from _color_blend(C_FUTURE_BG, white, 0.03) so it can
+# live at module level without a forward reference.  The visual
+# delta from C_FUTURE_BG is intentionally tiny — past cues are
+# differentiated mainly by dim text and unbold weight, not by a
+# loud background change like the previous #323232.
+C_PAST_BG    = QColor(44, 44, 44)
+# Section dividers were previously a warm amber (BG #231E14, text
+# #C8B97A) — visually distinct but clashed with cue tags that landed
+# in the same warm-tone family.  Move to neutral grey from the
+# design system so dividers read as "structural metadata" rather
+# than "another colour signal".
+C_SECTION_BG    = QColor(theme.SECTION_BG)
+C_SECTION_TEXT  = QColor(theme.SECTION_TEXT)
+C_SECTION_COUNT = QColor(theme.SECTION_COUNT_TEXT)
 C_TEXT_NORM  = QColor(220, 220, 220)
-C_TEXT_DIVIDER = QColor(150, 150, 200)
-C_TC_ERROR   = QColor(110, 35, 35)
-C_DUPLICATE  = QColor(140, 100, 20)
-C_DUP_HIGHLIGHT = QColor(160, 120, 30)
 
 # 20 color choices
+# A short, well-spaced palette is easier to scan than 20 near-duplicates.
+# Eight buckets cover the operator's actual semantic vocabulary
+# (alarm / warning / attention / go / info / secondary / special / neutral)
+# without three near-identical reds or three near-identical blues.
+# Names are kept stable so existing .ojeshow files that referenced any of
+# the deleted hues still resolve to the closest remaining bucket below.
 COLOR_PALETTE: List[Tuple[str, QColor]] = [
-    ("",           QColor(0, 0, 0, 0)),
-    ("red",        QColor(175, 48, 48)),
-    ("dark red",   QColor(120, 25, 25)),
-    ("orange",     QColor(195, 105, 38)),
-    ("amber",      QColor(210, 160, 30)),
-    ("yellow",     QColor(175, 155, 38)),
-    ("lime",       QColor(95, 180, 45)),
-    ("green",      QColor(48, 155, 75)),
-    ("dark green", QColor(30, 100, 50)),
-    ("teal",       QColor(38, 140, 130)),
-    ("cyan",       QColor(48, 165, 175)),
-    ("sky",        QColor(70, 145, 210)),
-    ("blue",       QColor(48, 95, 175)),
-    ("dark blue",  QColor(35, 55, 130)),
-    ("indigo",     QColor(75, 55, 160)),
-    ("purple",     QColor(125, 55, 175)),
-    ("magenta",    QColor(165, 50, 140)),
-    ("pink",       QColor(195, 95, 155)),
-    ("rose",       QColor(190, 70, 90)),
-    ("white",      QColor(200, 200, 200)),
-    ("grey",       QColor(110, 110, 110)),
+    ("",       QColor(0, 0, 0, 0)),       # no colour
+    ("red",    QColor(175, 48, 48)),
+    ("orange", QColor(195, 105, 38)),
+    ("amber",  QColor(210, 160, 30)),
+    ("green",  QColor(48, 155, 75)),
+    ("teal",   QColor(38, 140, 130)),
+    ("blue",   QColor(48, 95, 175)),
+    ("purple", QColor(125, 55, 175)),
+    ("grey",   QColor(110, 110, 110)),
 ]
+
+# Backwards-compat aliases — old shows referenced these names; map them
+# onto the closest surviving bucket so loading doesn't drop the colour.
+_COLOR_ALIASES = {
+    "dark red":   "red",
+    "yellow":     "amber",
+    "lime":       "green",
+    "dark green": "green",
+    "cyan":       "teal",
+    "sky":        "blue",
+    "dark blue":  "blue",
+    "indigo":     "purple",
+    "magenta":    "purple",
+    "pink":       "purple",
+    "rose":       "red",
+    "white":      "grey",
+}
 
 NAMED_COLORS = {name: color for name, color in COLOR_PALETTE if name}
 
@@ -61,7 +80,11 @@ COLUMNS = ("#", "Timecode", "Name", "Description", "Color")
 
 
 def _named_bg(name: str) -> Optional[QColor]:
-    return NAMED_COLORS.get(name.lower().strip())
+    key = (name or "").lower().strip()
+    if key in NAMED_COLORS:
+        return NAMED_COLORS[key]
+    # Resolve legacy names from the longer palette to a current colour.
+    return NAMED_COLORS.get(_COLOR_ALIASES.get(key, ""))
 
 
 def _color_icon(color: QColor, size: int = 16) -> QIcon:
@@ -79,31 +102,46 @@ def _color_icon(color: QColor, size: int = 16) -> QIcon:
 # ── Color delegate ────────────────────────────────────────────────────────────
 
 class ColorDelegate(QStyledItemDelegate):
+    """
+    Cue-colour cell paint.  Renders a tight horizontal pill instead
+    of an almost-cell-sized rectangle so the column reads as a
+    decorative tag, not a saturated stripe — consistent with the
+    new 7 % row tint, which is now the primary "what colour is
+    this cue?" signal.  Empty cues show a faint em-dash.
+    """
+
+    PILL_HEIGHT = 12
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        color_name = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        color = _named_bg(color_name)
+        color = _named_bg(index.data(Qt.ItemDataRole.DisplayRole) or "")
         painter.save()
         if color:
-            rect = QRect(option.rect.x() + 4, option.rect.y() + 4,
-                         option.rect.width() - 8, option.rect.height() - 8)
+            cell = option.rect
+            pill_w = max(cell.width() - 16, 0)
+            pill_h = self.PILL_HEIGHT
+            x = cell.x() + 8
+            y = cell.center().y() - pill_h // 2
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(rect, 4, 4)
-            painter.setPen(QColor(255, 255, 255, 200))
-            f = QFont(); f.setPointSize(10)
-            painter.setFont(f)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, color_name)
+            painter.drawRoundedRect(x, y, pill_w, pill_h, pill_h / 2, pill_h / 2)
         else:
-            painter.setPen(QColor(80, 80, 80))
+            painter.setPen(QColor(theme.TEXT_DISABLED))
+            f = QFont(); f.setPointSize(11)
+            painter.setFont(f)
             painter.drawText(option.rect, Qt.AlignmentFlag.AlignCenter, "—")
         painter.restore()
 
     def createEditor(self, parent, option, index):
         combo = QComboBox(parent)
         combo.setStyleSheet(
-            "QComboBox { background: #2a2a2a; color: #dcdcdc; border: 1px solid #555; }"
-            "QComboBox QAbstractItemView { background: #2a2a2a; color: #dcdcdc; }"
+            f"QComboBox {{ background: {theme.BG_INPUT}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_SM}px; }}"
+            f"QComboBox QAbstractItemView {{ background: {theme.BG_INPUT}; "
+            f"color: {theme.TEXT_PRIMARY}; "
+            f"selection-background-color: {theme.BG_RAISED}; }}"
         )
         for name, color in COLOR_PALETTE:
             if name:
@@ -189,7 +227,11 @@ class TimecodePopup(QFrame):
         if self._applied:
             return
         self._applied = True
-        val = self._edit.text().replace(" ", "")
+        # Use displayText() not text(): with blank char '0', text() strips
+        # typed zeros (can't distinguish them from unfilled positions), so
+        # e.g. "10:00:00:00" comes back as "1:::". displayText() preserves
+        # the visible value with blanks filled in.
+        val = self._edit.displayText()
         parts = val.split(":")
         if len(parts) != 4:
             return
@@ -205,28 +247,110 @@ class TimecodePopup(QFrame):
 # ── Timecode paint delegate (visual only, no editing) ─────────────────────────
 
 class TimecodeDelegate(QStyledItemDelegate):
+    """
+    Read-only paint for the timecode column.  The duplicate-row
+    indication used to live here as a small ⚠ glyph; it now lives
+    in DupBadgeDelegate on the NAME column (a clearer "DUP" pill,
+    co-located with the row's amber stripe and tint), so this
+    delegate is back to a plain paint.
+    """
+
+    def __init__(self, table: "CueTable", parent=None):
+        super().__init__(parent)
+        self._table = table
+
+    def createEditor(self, parent, option, index):
+        return None
+
+
+# ── Active-row stripe delegate ───────────────────────────────────────────────
+
+class ActiveRowDelegate(QStyledItemDelegate):
+    """
+    Lays a 3-px coloured stripe down the left edge of certain rows.
+    Installed only on column 0 (#) — a stripe at the left of the
+    leftmost cell reads as "the row's left border" because col 0
+    butts up against the table's left edge.
+
+    Priority: active (green) > duplicate (amber).  An active cue
+    that also happens to be a duplicate is still "live", so the
+    green wins.
+
+    The row tint, text colour, and bold come from
+    _apply_styles_inner; this delegate only adds the visible stripe,
+    so a stale state still looks sensible if the painter runs first.
+    """
+
+    STRIPE_WIDTH = 3
+
     def __init__(self, table: "CueTable", parent=None):
         super().__init__(parent)
         self._table = table
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        row = index.row()
-        is_dup = row in self._table._duplicate_rows
-
         super().paint(painter, option, index)
-
-        if is_dup:
+        row = index.row()
+        stripe = None
+        if row == self._table._active_row:
+            stripe = QColor(theme.SEMANTIC_SUCCESS)
+        elif row in self._table._duplicate_rows:
+            stripe = QColor(theme.SEMANTIC_WARNING)
+        if stripe is not None:
             painter.save()
-            painter.setPen(QColor(225, 180, 40))
-            f = QFont(); f.setPointSize(13)
-            painter.setFont(f)
-            x = option.rect.right() - 18
-            y = option.rect.center().y() + 5
-            painter.drawText(x, y, "⚠")
+            painter.setBrush(QBrush(stripe))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRect(
+                option.rect.x(), option.rect.y(),
+                self.STRIPE_WIDTH, option.rect.height(),
+            )
             painter.restore()
 
-    def createEditor(self, parent, option, index):
-        return None
+
+class DupBadgeDelegate(QStyledItemDelegate):
+    """
+    Paints a small amber "DUP" pill at the right edge of the NAME
+    column for duplicate-timecode rows.  Coexists with the cell's
+    own text + editor — the pill is purely visual feedback,
+    drawn on top after the default item paint.
+    """
+
+    def __init__(self, table: "CueTable", parent=None):
+        super().__init__(parent)
+        self._table = table
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        super().paint(painter, option, index)
+        if index.row() not in self._table._duplicate_rows:
+            return
+        # Don't paint the badge on dividers (which never carry a
+        # timecode and so can't be duplicates anyway, but be safe).
+        cue = self._table._cues[index.row()] if index.row() < len(self._table._cues) else None
+        if cue is None or cue.is_divider:
+            return
+
+        painter.save()
+        f = QFont(); f.setPointSize(9); f.setBold(True)
+        painter.setFont(f)
+        text = "DUP"
+        fm = painter.fontMetrics()
+        text_w = fm.horizontalAdvance(text)
+        pad_x = 6
+        pad_y = 2
+        pill_w = text_w + pad_x * 2
+        pill_h = fm.height() + pad_y * 2
+        x = option.rect.right() - pill_w - 6
+        y = option.rect.center().y() - pill_h // 2
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(theme.SEMANTIC_WARNING)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(x, y, pill_w, pill_h, pill_h / 2, pill_h / 2)
+        painter.setPen(QColor("#1a1300"))      # dark ink for AAA contrast on amber
+        painter.drawText(
+            QRect(x, y, pill_w, pill_h),
+            Qt.AlignmentFlag.AlignCenter,
+            text,
+        )
+        painter.restore()
 
 
 # ── CueTable ─────────────────────────────────────────────────────────────────
@@ -248,16 +372,30 @@ class CueTable(QTableWidget):
         self._cues: List[Cue] = []
         self._duplicate_rows: set = set()
         self._highlighted_siblings: List[int] = []
+        self._section_counts: Dict[int, int] = {}
+        self._active_row: int = -1
 
         self.setHorizontalHeaderLabels(COLUMNS)
         hh = self.horizontalHeader()
+        # Column sizing rationale:
+        #   #          fits to content (1-3 digits)
+        #   Timecode   fixed 120 px — always HH:MM:SS:FF, no wrap
+        #   Name       interactive ~220 px — readable but doesn't hog
+        #   Description STRETCH — takes whatever's left; this is the
+        #              column that gets squeezed when the operator panel
+        #              opens on the right, so Description gets priority
+        #   Color      fixed 64 px — narrow pill swatch (the row tint
+        #              already carries the colour signal; this column
+        #              just gives the operator a quick "what tag?"
+        #              indicator and the picker affordance)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         hh.resizeSection(1, 120)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(2, 220)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        hh.resizeSection(4, 90)
+        hh.resizeSection(4, 64)
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -268,9 +406,26 @@ class CueTable(QTableWidget):
 
         f = QFont(); f.setPointSize(12)
         self.setFont(f)
+        # Focus ring on the active cell — sub-treme blue outline so the
+        # operator can see where their next keystroke goes (Qt's default
+        # is no border at all on QTableWidget cells).
+        self.setStyleSheet(self.styleSheet() + """
+            QTableWidget::item:focus {
+                border: 1px solid #5a8ec0;
+                outline: none;
+            }
+            QTableWidget::item:selected {
+                background: #2c4a70;
+            }
+        """)
 
+        self.setItemDelegateForColumn(0, ActiveRowDelegate(self, self))
         self.setItemDelegateForColumn(1, TimecodeDelegate(self, self))
+        self.setItemDelegateForColumn(2, DupBadgeDelegate(self, self))
         self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
+        # Hidden by default — set_edit_mode(True) reveals it when
+        # the operator enters edit mode.
+        self.setColumnHidden(COL_COLOR, True)
         self.itemChanged.connect(self._on_item_changed)
         self.currentCellChanged.connect(self._on_cell_changed)
 
@@ -283,6 +438,7 @@ class CueTable(QTableWidget):
             if 0 <= row < len(cues) and cues[row].is_divider
         }
         self._compute_duplicates(cues)
+        self._compute_section_counts(cues)
         self._highlighted_siblings = []
         self._block_signal = True
         self.setRowCount(len(cues))
@@ -294,23 +450,42 @@ class CueTable(QTableWidget):
         if self._edit_mode:
             self._update_duplicate_highlight(self.currentRow())
 
-    def _compute_duplicates(self, cues: List[Cue]):
-        from collections import Counter
-        tc_counts = Counter(
-            c.timecode.strip() for c in cues
-            if not c.is_divider and c.timecode.strip()
-        )
-        self._duplicate_rows = set()
+    def _compute_section_counts(self, cues: List[Cue]):
+        """
+        For each divider row, count how many real cues fall under it
+        (everything from the row after the divider up to the next
+        divider, or end of list).  Used by _write_row to append
+        " · N" to the divider's display name so the operator sees
+        the section weight at a glance.
+        """
+        counts: Dict[int, int] = {}
+        current_divider = None
+        running = 0
         for row, cue in enumerate(cues):
-            if not cue.is_divider and cue.timecode.strip():
-                if tc_counts[cue.timecode.strip()] > 1:
-                    self._duplicate_rows.add(row)
+            if cue.is_divider:
+                if current_divider is not None:
+                    counts[current_divider] = running
+                current_divider = row
+                running = 0
+            else:
+                running += 1
+        if current_divider is not None:
+            counts[current_divider] = running
+        self._section_counts = counts
+
+    def _compute_duplicates(self, cues: List[Cue]):
+        # Single source of truth lives in cue_engine — the PDF export
+        # uses the same helper so the table and the cue sheet can
+        # never flag different rows as duplicates.
+        self._duplicate_rows = find_duplicate_rows(cues)
 
     def _write_row(self, row: int, cue: Cue):
         tc_display = cue.timecode if not cue.is_divider else ""
         name_display = cue.name
         if cue.is_divider:
-            name_display = f"  {cue.name}"
+            count = self._section_counts.get(row, 0)
+            count_part = f"  ·  {count} cue{'' if count == 1 else 's'}" if count else ""
+            name_display = f"  {cue.name}{count_part}"
 
         is_dup = row in self._duplicate_rows
 
@@ -397,6 +572,44 @@ class CueTable(QTableWidget):
                 return
         super().mousePressEvent(event)
 
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount() != 0:
+            return
+        # Empty-state placeholder.  An untouched QTableWidget with no
+        # rows is a blank charcoal slab — readable, but it gives the
+        # operator no clue what they're meant to do.  A short, dim
+        # two-line message at the centre points to the two normal
+        # ways to populate the list.
+        painter = QPainter(self.viewport())
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = self.viewport().rect()
+            center_y = rect.center().y()
+
+            head_font = QFont(); head_font.setPointSize(15); head_font.setBold(True)
+            sub_font  = QFont(); sub_font.setPointSize(11)
+
+            painter.setPen(QColor(theme.TEXT_MUTED))
+            painter.setFont(head_font)
+            head_h = painter.fontMetrics().height()
+            painter.drawText(
+                QRect(rect.x(), center_y - head_h, rect.width(), head_h),
+                Qt.AlignmentFlag.AlignCenter,
+                "No cues yet",
+            )
+
+            painter.setPen(QColor(theme.TEXT_DIM))
+            painter.setFont(sub_font)
+            sub_h = painter.fontMetrics().height()
+            painter.drawText(
+                QRect(rect.x(), center_y + 4, rect.width(), sub_h),
+                Qt.AlignmentFlag.AlignCenter,
+                "Add one with + in Edit Cues, or open a .ojeshow / .csv from File.",
+            )
+        finally:
+            painter.end()
+
     def _open_timecode_editor(self, row: int):
         cue = self._cues[row]
         item = self.item(row, 1)
@@ -431,6 +644,18 @@ class CueTable(QTableWidget):
             self.blockSignals(False)
 
     def _apply_styles_inner(self, cues: List[Cue], current_cue: Optional[Cue], current_frames: int):
+        prev_active = self._active_row
+        if current_cue is not None and 1 <= current_cue.index <= len(cues):
+            self._active_row = current_cue.index - 1
+        else:
+            self._active_row = -1
+        # Repaint col 0 of the previous active row so its green stripe
+        # disappears when the current cue advances.  setBackground on
+        # the new active row covers the new stripe automatically; only
+        # the *outgoing* row needs an explicit nudge.
+        if prev_active != self._active_row and prev_active >= 0:
+            idx = self.model().index(prev_active, 0)
+            self.update(idx)
         for row, cue in enumerate(cues):
             if cue.is_divider:
                 collapsed = row in self._collapsed_groups
@@ -442,13 +667,25 @@ class CueTable(QTableWidget):
                     item = self.item(row, col)
                     if not item:
                         continue
-                    item.setBackground(QBrush(C_DIVIDER_BG))
-                    item.setForeground(QBrush(C_TEXT_DIVIDER))
+                    item.setBackground(QBrush(C_SECTION_BG))
+                    # Section name is brighter than the trailing
+                    # "· N cues" text — Qt items are single-foreground,
+                    # so we settle on the brighter section colour for
+                    # the whole cell and rely on the count's quieter
+                    # phrasing to step back visually.
+                    item.setForeground(QBrush(C_SECTION_TEXT))
                     _bold(item, True)
                 continue
 
             is_current = current_cue is not None and cue.index == current_cue.index
-            is_past    = current_cue is not None and row < (current_cue.index - 1) and not is_current
+            # "Past" by timecode, not by list row. Non-linear cue ordering
+            # means a cue further down the list can be in the past
+            # (smaller timecode) and one near the top can be in the future.
+            is_past = (
+                cue.has_timecode
+                and not is_current
+                and cue.frames <= current_frames
+            )
             is_dup     = row in self._duplicate_rows
             is_dup_hl  = row in self._highlighted_siblings
             custom_bg  = _named_bg(cue.color) if cue.color else None
@@ -460,23 +697,59 @@ class CueTable(QTableWidget):
                 if not item:
                     continue
                 if is_current:
-                    item.setBackground(QBrush(custom_bg if custom_bg else C_CURRENT))
-                    item.setForeground(QBrush(C_TEXT_NORM))
+                    # Active cue is always green tint regardless of any
+                    # cue-colour tag — the green carries the "this is
+                    # live" semantic, and the cue colour reverts to a
+                    # decorative tag (still visible in the COL_COLOR
+                    # swatch and its 7 % row tint when not active).
+                    # The stripe at the row's left edge is painted by
+                    # ActiveRowDelegate on col 0.
+                    item.setBackground(
+                        QBrush(_color_blend(C_FUTURE_BG,
+                                            QColor(theme.SEMANTIC_SUCCESS),
+                                            0.14))
+                    )
+                    item.setForeground(QBrush(QColor(theme.TEXT_BRIGHT)))
                     _bold(item, True)
-                elif is_dup_hl:
-                    item.setBackground(QBrush(C_DUP_HIGHLIGHT))
-                    item.setForeground(QBrush(C_TEXT_NORM))
-                    _bold(item, False)
-                elif is_dup and col == 1:
-                    item.setBackground(QBrush(C_DUPLICATE))
-                    item.setForeground(QBrush(C_TEXT_NORM))
+                elif is_dup_hl or is_dup:
+                    # Duplicate-timecode rows: a 14 % amber blend over
+                    # the row, matching the active-row blend strength
+                    # but in the warning hue.  Sibling-highlighted
+                    # rows (the operator clicked one duplicate to see
+                    # its peers) get a slightly stronger 18 % blend
+                    # plus brighter text so the selection emphasis
+                    # still stands out without introducing yet
+                    # another colour.  The full row tints — col 1 is
+                    # no longer special-cased.  The "DUP" pill is
+                    # painted by DupBadgeDelegate on col 2 and the
+                    # left stripe by ActiveRowDelegate on col 0.
+                    alpha = 0.18 if is_dup_hl else 0.14
+                    item.setBackground(
+                        QBrush(_color_blend(C_FUTURE_BG,
+                                            QColor(theme.SEMANTIC_WARNING),
+                                            alpha))
+                    )
+                    item.setForeground(
+                        QBrush(QColor(theme.TEXT_BRIGHT if is_dup_hl else theme.TEXT_PRIMARY))
+                    )
                     _bold(item, False)
                 elif is_past:
                     item.setBackground(QBrush(C_PAST_BG))
-                    item.setForeground(QBrush(C_TEXT_DIM))
+                    item.setForeground(QBrush(QColor(theme.TEXT_MUTED)))
                     _bold(item, False)
                 else:
-                    item.setBackground(QBrush(custom_bg.darker(200) if custom_bg else C_FUTURE_BG))
+                    # Cue-colour rows now read as "tagged with this hue"
+                    # rather than "filled with this hue" — a 7 % blend
+                    # over the standard future-row background lifts the
+                    # tone enough to spot at a glance without making the
+                    # name text fight the colour for legibility.  Old
+                    # behaviour (full dark shade) flooded the row and
+                    # made every coloured cue look more important than
+                    # the white-text default cue.
+                    if custom_bg:
+                        item.setBackground(QBrush(_color_blend(C_FUTURE_BG, custom_bg, 0.07)))
+                    else:
+                        item.setBackground(QBrush(C_FUTURE_BG))
                     item.setForeground(QBrush(C_TEXT_NORM))
                     _bold(item, False)
 
@@ -491,6 +764,10 @@ class CueTable(QTableWidget):
             )
         else:
             self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Color column is only useful in edit mode (the picker). In view
+        # mode the whole row already tints to the cue colour, so the
+        # column itself is just visual noise — hide it.
+        self.setColumnHidden(COL_COLOR, not enabled)
         self._apply_collapse()
 
     def _on_item_changed(self, item: QTableWidgetItem):
@@ -557,7 +834,7 @@ class OperatorEditPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
-            "OperatorEditPanel { background: #1a1a1a; border-top: 1px solid #333; }"
+            "OperatorEditPanel { background: #1a1a1a; border-left: 1px solid #333; }"
         )
         self._current_row = -1
         self._operator_names: List[str] = []
@@ -565,8 +842,8 @@ class OperatorEditPanel(QFrame):
         self._field_widgets: list = []
 
         self._root_lay = QVBoxLayout(self)
-        self._root_lay.setContentsMargins(12, 6, 12, 6)
-        self._root_lay.setSpacing(3)
+        self._root_lay.setContentsMargins(12, 8, 12, 8)
+        self._root_lay.setSpacing(6)
 
         self._title = QLabel("OPERATOR COMMENTS")
         self._title.setStyleSheet(
@@ -574,35 +851,52 @@ class OperatorEditPanel(QFrame):
         )
         self._root_lay.addWidget(self._title)
 
+        # Scroll area lets the panel handle many operators or tall comments
+        # without needing a fixed pixel height (which used to fight with the
+        # splitter that owns this widget).
+        from PyQt6.QtWidgets import QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+
         self._fields_container = QWidget()
+        self._fields_container.setStyleSheet("background: transparent;")
         self._fields_lay = QVBoxLayout(self._fields_container)
         self._fields_lay.setContentsMargins(0, 0, 0, 0)
-        self._fields_lay.setSpacing(2)
-        self._root_lay.addWidget(self._fields_container)
+        self._fields_lay.setSpacing(8)
+        scroll.setWidget(self._fields_container)
+        self._root_lay.addWidget(scroll, 1)
+        self.setMinimumWidth(280)
 
     def set_operators(self, operator_names: List[str]):
         self._operator_names = operator_names
-        # Clear existing
-        for w in self._field_widgets:
-            w.setParent(None)
-            w.deleteLater()
+        # Clear existing widgets AND any leftover stretch so the previous
+        # bottom-spacer doesn't accumulate across rebuilds.
+        while self._fields_lay.count():
+            item = self._fields_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
         self._field_widgets.clear()
         self._fields.clear()
 
         for name in operator_names:
             row_w = QWidget()
-            row_lay = QHBoxLayout(row_w)
+            row_lay = QVBoxLayout(row_w)
             row_lay.setContentsMargins(0, 0, 0, 0)
-            row_lay.setSpacing(8)
+            row_lay.setSpacing(2)
 
-            lbl = QLabel(name)
-            lbl.setFixedWidth(110)
-            lbl.setStyleSheet("color: #8888cc; font-size: 11px; font-weight: bold;")
+            lbl = QLabel(name.upper())
+            lbl.setStyleSheet(
+                "color: #8888cc; font-size: 10px; font-weight: bold; letter-spacing: 1.5px;"
+            )
             row_lay.addWidget(lbl)
 
             edit = _OperatorCommentEdit()
-            edit.setPlaceholderText("Multi-line comment")
-            edit.setFixedHeight(58)
+            edit.setPlaceholderText("Multi-line comment…")
+            edit.setMinimumHeight(58)
             edit.setStyleSheet(
                 "QPlainTextEdit { background: #222; color: #ddd; border: 1px solid #3a3a3a; "
                 "border-radius: 3px; padding: 4px 6px; font-size: 12px; }"
@@ -615,8 +909,11 @@ class OperatorEditPanel(QFrame):
             self._fields_lay.addWidget(row_w)
             self._field_widgets.append(row_w)
 
-        h = 34 + len(operator_names) * 64 if operator_names else 0
-        self.setFixedHeight(h)
+        # Bottom stretch keeps operator rows pinned at the top instead of
+        # the QPlainTextEdits ballooning to fill an oversized panel.
+        self._fields_lay.addStretch(1)
+        # Don't lock our height — the splitter owns it.
+        self.setMinimumHeight(0)
 
     def show_for_cue(self, row: int, cue: Cue):
         self._current_row = row
@@ -644,6 +941,21 @@ def _bold(item: QTableWidgetItem, bold: bool):
         item.setFont(f)
 
 
+def _color_blend(base: QColor, accent: QColor, alpha: float) -> QColor:
+    """
+    Return `base` overlaid with `accent` at `alpha` (0..1).  Qt's
+    QColor has no built-in blend op, so we mix the two RGB triples
+    manually.  Used for the subtle cue-colour row tint — at 0.07
+    the row reads as "vaguely tinted toward this colour" rather
+    than "this colour, dimmed".
+    """
+    inv = 1.0 - alpha
+    r = int(round(base.red()   * inv + accent.red()   * alpha))
+    g = int(round(base.green() * inv + accent.green() * alpha))
+    b = int(round(base.blue()  * inv + accent.blue()  * alpha))
+    return QColor(r, g, b)
+
+
 class _OperatorCommentEdit(QPlainTextEdit):
     editingFinished = pyqtSignal()
 
@@ -655,23 +967,49 @@ class _OperatorCommentEdit(QPlainTextEdit):
 class CueEditToolbar(QWidget):
     def __init__(self, table: CueTable, parent=None):
         super().__init__(parent)
+        from ui.icons import make_icon, icon_size
+
         self.setFixedHeight(38)
-        self.setStyleSheet("background: #1a1a1a; border-bottom: 1px solid #3c3c3c;")
+        # Toolbar surface + ghost-icon buttons, all token-driven.
+        # Slightly elevated bg (BG_RAISED) so the toolbar reads as
+        # a strip above the cue table; subtle BORDER_SUBTLE bottom
+        # divider rather than the previous loud #3c3c3c rule.
+        self.setStyleSheet(
+            f"QWidget {{ background: {theme.BG_HEADER}; "
+            f"border-bottom: 1px solid {theme.BORDER_SUBTLE}; }}"
+            f"QPushButton {{ "
+            f"background: {theme.BG_RAISED}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_SM}px; padding: 0; }}"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
+            f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
+        )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 4, 10, 4)
-        lay.setSpacing(6)
+        lay.setSpacing(4)
 
-        def btn(label: str, slot, tip: str = "") -> QPushButton:
-            b = QPushButton(label)
-            b.setFixedHeight(26)
+        def btn(icon_name: str, slot, tip: str,
+                icon_color: str = theme.TEXT_PRIMARY) -> QPushButton:
+            b = QPushButton()
+            b.setIcon(make_icon(icon_name, icon_color))
+            b.setIconSize(icon_size(16))
+            b.setFixedSize(30, 28)
             b.setToolTip(tip)
             b.clicked.connect(slot)
             lay.addWidget(b)
             return b
 
-        btn("+ Cue",     table.add_row_after_selected,     "Add cue after selection")
-        btn("+ Section", table.add_divider_after_selected, "Add section divider")
-        btn("Delete",    table.delete_selected_rows,       "Delete selected rows")
-        btn("Up",        table.move_selected_up,           "Move row up")
-        btn("Down",      table.move_selected_down,         "Move row down")
+        # Create / delete trio.  Delete glyph carries the danger
+        # hue so the operator's eye registers the destructive
+        # action even before reading the tooltip.
+        btn("plus",    table.add_row_after_selected,     "Add cue after selection")
+        btn("section", table.add_divider_after_selected, "Add section divider")
+        btn("x",       table.delete_selected_rows,       "Delete selected rows",
+            icon_color=theme.SEMANTIC_DANGER)
+
+        # Move-row pair, separated visually so it reads as a unit.
+        lay.addSpacing(8)
+        btn("up",   table.move_selected_up,   "Move row up")
+        btn("down", table.move_selected_down, "Move row down")
         lay.addStretch()

@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(0, 97, 0, 0),
-    prodvers=(0, 97, 0, 0),
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -15,12 +15,12 @@ VSVersionInfo(
         u'040904B0',
         [StringStruct(u'CompanyName',      u'\xd8JE Studio (oje.studio)'),
          StringStruct(u'FileDescription',  u'\xd8JE CUE MONITOR'),
-         StringStruct(u'FileVersion',      u'0.97.0'),
+         StringStruct(u'FileVersion',      u'1.0.0'),
          StringStruct(u'InternalName',     u'OJECueMonitor'),
          StringStruct(u'LegalCopyright',   u'\xa9 2026 \xd8JE Studio \xb7 oje.studio \xb7 hello@oje.studio'),
          StringStruct(u'OriginalFilename', u'OJE CUE MONITOR.exe'),
          StringStruct(u'ProductName',      u'\xd8JE CUE MONITOR'),
-         StringStruct(u'ProductVersion',   u'0.97.0')])
+         StringStruct(u'ProductVersion',   u'1.0.0')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]

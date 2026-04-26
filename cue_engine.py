@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field as dc_field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 
 from show_file import ShowCue
 
@@ -21,6 +22,30 @@ class Cue:
     @property
     def has_timecode(self) -> bool:
         return self.timecode.strip() != "" and self.frames >= 0
+
+
+def find_duplicate_rows(cues: List["Cue"]) -> Set[int]:
+    """
+    Return the set of row indices whose timecode is shared with at
+    least one other (non-divider) cue.  A single source of truth so
+    the cue table, the PDF export and any other surface that flags
+    duplicates can never disagree about the answer.
+
+    Equality is whitespace-stripped string equality on `timecode`;
+    no further normalisation since the engine produces canonical
+    HH:MM:SS:FF strings already.  Dividers and empty-TC rows are
+    excluded from the count.
+    """
+    tc_counts = Counter(
+        c.timecode.strip() for c in cues
+        if not c.is_divider and c.timecode.strip()
+    )
+    return {
+        row for row, c in enumerate(cues)
+        if not c.is_divider
+        and c.timecode.strip()
+        and tc_counts[c.timecode.strip()] > 1
+    }
 
 
 class CueParseError(Exception):
@@ -203,21 +228,39 @@ class CueEngine:
     # ── queries ───────────────────────────────────────────────────────────────
 
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
+        """
+        Non-linear cue triggering — cues are matched purely by timecode,
+        not by list order. The "current" cue is the one whose timecode is
+        most recently passed (largest frames value <= tc_frames). When two
+        cues share the same timecode, the later one in list order wins
+        (matches the duplicate-TC warning shown in the editor).
+        """
         self._prev_frames = tc_frames
-        last_match = -1
+        best_idx = -1
+        best_frames = -1
         for i, cue in enumerate(self.cues):
             if cue.is_divider or not cue.has_timecode:
                 continue
-            if cue.frames <= tc_frames:
-                last_match = i
-            else:
-                break
-        self._active_index = last_match
-        if 0 <= self._active_index < len(self.cues):
-            return self.cues[self._active_index]
+            if cue.frames <= tc_frames and cue.frames >= best_frames:
+                best_idx = i
+                best_frames = cue.frames
+        self._active_index = best_idx
+        if 0 <= best_idx < len(self.cues):
+            return self.cues[best_idx]
         return None
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
+        """
+        Next cue in *list order* — i.e. the show's running order, which is
+        what the operator actually maintains. Random access by timecode is
+        only for resolving the *current* cue; once that's pinned down,
+        "next" walks the list from there.
+
+        Why list order, not time order:
+        if cues are 04:00 (row 1), then 03:00 (row 17, last), the operator
+        considers 03:00 the end of the show. After it plays, "next" should
+        be empty — not 04:00 again from the top.
+        """
         start = self._active_index + 1 if self._active_index >= 0 else 0
         for i in range(start, len(self.cues)):
             cue = self.cues[i]
