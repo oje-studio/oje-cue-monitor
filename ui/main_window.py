@@ -137,12 +137,11 @@ class CueCard(QFrame):
         self.desc_lbl.setWordWrap(True)
         lay.addWidget(self.desc_lbl)
 
-        self.ops_lbl = QLabel("")
-        self.ops_lbl.setStyleSheet(
-            f"color: {ACCENT_YELLOW.name()}; font-size: 12px;"
-        )
-        self.ops_lbl.setWordWrap(True)
-        lay.addWidget(self.ops_lbl)
+        # Operator notes are NOT rendered in the main window cue cards —
+        # they got squashed and read poorly. The full operator notes
+        # surface in Performance Mode and the Web Remote (which have
+        # space) and are edited via the OperatorEditPanel in Edit Cues.
+        self.ops_lbl = None
 
         self.cd_lbl = QLabel("")
         self.cd_lbl.setFont(mono_font(16))
@@ -161,21 +160,10 @@ class CueCard(QFrame):
         if cue is None:
             self.name_lbl.setText("—")
             self.desc_lbl.setText("")
-            self.ops_lbl.setText("")
             self.cd_lbl.setText("")
             return
         self.name_lbl.setText(cue.name or "—")
         self.desc_lbl.setText(cue.description)
-        # Iterate the current operator list (not cue.operator_comments keys)
-        # so renamed/removed operators don't leak stale entries into the view.
-        # Multi-line comments are indented on continuation lines for legibility.
-        comments = cue.operator_comments or {}
-        lines = [
-            f"{name}: {comments[name].replace(chr(10), chr(10) + '    ')}"
-            for name in self._operator_names
-            if comments.get(name)
-        ]
-        self.ops_lbl.setText("\n".join(lines))
         if countdown is not None and self._countdown_enabled:
             m, s  = divmod(int(countdown), 60)
             color = ACCENT_RED.name() if countdown < 10 else TEXT_BRIGHT.name()
@@ -317,6 +305,23 @@ class MainWindow(QMainWindow):
         self._header_logo = QLabel()
         self._header_logo.setVisible(False)
         hl.addWidget(self._header_logo)
+
+        # Wall clock at the far right of the header — sized to match the
+        # timecode (mono 24, bold) so the eye reads them as a pair:
+        # "show timecode" on one side, "real-world time" on the other.
+        # Small clock-face icon prefix makes it unmistakable that this
+        # is wall time, not another timecode.
+        from ui.icons import make_icon
+        hl.addWidget(_vline())
+        self._clock_icon_lbl = QLabel()
+        self._clock_icon_lbl.setPixmap(
+            make_icon("clock", "#878787").pixmap(20, 20)
+        )
+        hl.addWidget(self._clock_icon_lbl)
+        self._clock_label = QLabel("")
+        self._clock_label.setFont(mono_font(24, bold=True))
+        self._clock_label.setStyleSheet(f"color: {TEXT_BRIGHT.name()};")
+        hl.addWidget(self._clock_label)
         # Header now ends here — Performance and Start moved to the
         # footer alongside Edit Cues / Remote so the operator sees one
         # clean monitoring strip on top and one action strip at the
@@ -381,7 +386,21 @@ class MainWindow(QMainWindow):
         fl.setContentsMargins(12, 0, 12, 0)
         fl.setSpacing(8)
 
-        # ── Left cluster: Edit Cues ──────────────────────────────────
+        # ── Left edge: Help + Edit Cues ──────────────────────────────
+        # Tiny "?" pill on the very left, dim — quick path to the help
+        # dialog without occupying the menu bar.
+        self._btn_help = QPushButton("?")
+        self._btn_help.setFixedSize(28, 28)
+        self._btn_help.setToolTip("Help & Keyboard Shortcuts  [F1]")
+        self._btn_help.setStyleSheet(
+            "QPushButton { background: transparent; color: #707070;"
+            "  border: 1px solid #2d2d2d; border-radius: 14px;"
+            "  font-weight: bold; font-size: 13px; }"
+            "QPushButton:hover { color: #d8d8d8; border-color: #4a4a4a; }"
+        )
+        self._btn_help.clicked.connect(self._show_help)
+        fl.addWidget(self._btn_help)
+
         # Show prep lives on the left — the operator does this before
         # the show starts and may dip back in mid-show to tweak notes.
         self._btn_edit = QPushButton(" Edit Cues")
@@ -392,6 +411,12 @@ class MainWindow(QMainWindow):
         self._btn_edit.clicked.connect(self._toggle_edit_mode)
         fl.addWidget(self._btn_edit)
 
+        fl.addStretch()
+        # Studio copyright in the middle, tiny + dim — recognised but
+        # not competing for attention.
+        cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}")
+        cr_lbl.setStyleSheet(f"color: {QColor(70,70,70).name()}; font-size: 10px;")
+        fl.addWidget(cr_lbl)
         fl.addStretch()
 
         # ── Right cluster: Remote → Performance → START ──────────────
@@ -426,15 +451,6 @@ class MainWindow(QMainWindow):
         self._btn_start.setStyleSheet(_start_btn_style())
         self._btn_start.clicked.connect(self._toggle_start)
         fl.addWidget(self._btn_start)
-
-        fl.addSpacing(10)
-
-        # Wall clock — small, dim, far right. Useful for tracking
-        # intermission / break time without drawing the eye.
-        self._clock_label = QLabel("")
-        self._clock_label.setFont(mono_font(11))
-        self._clock_label.setStyleSheet(f"color: {TEXT_DIM.name()};")
-        fl.addWidget(self._clock_label)
 
         root.addWidget(footer)
 
@@ -1220,6 +1236,12 @@ Generated {html.escape(generated_at)}<br>
         if field == "timecode":
             self._table.load_cues(self._engine.cues)
             self._table.set_edit_mode(True)
+        elif field == "color":
+            # Re-style immediately so the new colour shows as a row
+            # tint on the next paint instead of waiting for the
+            # _update_cues tick.
+            self._table.update_highlight(self._engine.cues, None,
+                                         self._current_frames)
         else:
             self._table.refresh_index_column(self._engine.cues)
         self._mark_dirty()

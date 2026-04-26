@@ -315,6 +315,9 @@ class CueTable(QTableWidget):
 
         self.setItemDelegateForColumn(1, TimecodeDelegate(self, self))
         self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
+        # Hidden by default — set_edit_mode(True) reveals it when
+        # the operator enters edit mode.
+        self.setColumnHidden(COL_COLOR, True)
         self.itemChanged.connect(self._on_item_changed)
         self.currentCellChanged.connect(self._on_cell_changed)
 
@@ -542,6 +545,10 @@ class CueTable(QTableWidget):
             )
         else:
             self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Color column is only useful in edit mode (the picker). In view
+        # mode the whole row already tints to the cue colour, so the
+        # column itself is just visual noise — hide it.
+        self.setColumnHidden(COL_COLOR, not enabled)
         self._apply_collapse()
 
     def _on_item_changed(self, item: QTableWidgetItem):
