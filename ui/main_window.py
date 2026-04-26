@@ -262,14 +262,7 @@ class MainWindow(QMainWindow):
         hl.setContentsMargins(14, 0, 14, 0)
         hl.setSpacing(10)
 
-        app_lbl = QLabel(APP_NAME)
-        app_lbl.setFont(sans_font(15, bold=True))
-        app_lbl.setStyleSheet(f"color: {TEXT_BRIGHT.name()}; letter-spacing: 1px;")
-        hl.addWidget(app_lbl)
-
-        ver_lbl = QLabel(VERSION)
-        ver_lbl.setStyleSheet(f"color: {TEXT_DIM.name()}; font-size: 11px;")
-        hl.addWidget(ver_lbl)
+        hl.addWidget(BrandMark(parent=header), alignment=Qt.AlignmentFlag.AlignVCenter)
 
         hl.addWidget(_vline())
 
@@ -1810,6 +1803,50 @@ def _hline() -> QFrame:
     f.setFrameShape(QFrame.Shape.HLine)
     f.setStyleSheet(f"color: {DARK_BORDER.name()};")
     return f
+
+
+class BrandMark(QWidget):
+    """
+    The studio mark (white "ØJE" square) followed by the product
+    name and version.  One reusable widget so the same brand block
+    can land in the header, the About dialog, the PDF cover, etc.
+    without each surface re-implementing the typography.
+
+    Tokens:
+      square      theme.BRAND_MARK_BG / BRAND_MARK_FG / BRAND_MARK_SIZE
+      product     theme.TEXT_BRIGHT (semibold, tracked)
+      version     theme.TEXT_MUTED  (regular)
+    """
+
+    def __init__(self, product: str = "CUE MONITOR", version: str = VERSION,
+                 parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        mark = QLabel("ØJE")
+        mark.setFixedSize(theme.BRAND_MARK_SIZE, theme.BRAND_MARK_SIZE)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet(
+            f"background: {theme.BRAND_MARK_BG}; "
+            f"color: {theme.BRAND_MARK_FG}; "
+            f"border-radius: {theme.RADIUS_SM}px; "
+            "font-weight: 800; font-size: 10px; letter-spacing: 0.5px;"
+        )
+        lay.addWidget(mark, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        name = QLabel(product)
+        name.setFont(sans_font(13, bold=False))
+        name.setStyleSheet(
+            f"color: {theme.TEXT_BRIGHT}; font-weight: 600; letter-spacing: 1.5px;"
+        )
+        lay.addWidget(name, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        ver = QLabel(version)
+        ver.setFont(sans_font(11, bold=False))
+        ver.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+        lay.addWidget(ver, alignment=Qt.AlignmentFlag.AlignVCenter)
 
 
 def _vline() -> QFrame:
