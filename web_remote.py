@@ -375,7 +375,7 @@ body {{
     min-width: 8ch;
     text-align: center;
 }}
-.statusbar .sep {{ color: #3d3d3d; }}
+.statusbar .sep {{ color: #5a5a5a; opacity: 0.7; }}
 
 /* ── 5-bar VU meter (CSS only, mirrors the Mac one) ─────────────────────── */
 .vu {{
@@ -694,11 +694,11 @@ body {{
 <div class="statusbar">
     <span class="dot" id="signal-dot">●</span>
     <span class="tc" id="timecode">--:--:--</span>
-    <span class="sep">|</span>
+    <span class="sep">·</span>
     <span class="meta" id="fps">FPS --</span>
-    <span class="sep">|</span>
+    <span class="sep">·</span>
     <span class="meta" id="signal-state">NO SIGNAL</span>
-    <span class="sep">|</span>
+    <span class="sep">·</span>
     <span class="vu" id="vu" aria-label="Audio level">
         <span class="bar"></span>
         <span class="bar"></span>
@@ -707,7 +707,7 @@ body {{
         <span class="bar"></span>
     </span>
     <span class="meta" id="signal-db">−∞ dB</span>
-    <span class="sep">|</span>
+    <span class="sep">·</span>
     <span class="clock" id="clock">--:--:--</span>
 </div>
 <!-- (Access button removed — the operator switches identity by reloading

@@ -123,8 +123,8 @@ class PerformanceView(QWidget):
         self._tc_header_lbl.setStyleSheet("color: #f0f0f0;")
         tb_lay.addWidget(self._tc_header_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_1 = QLabel("|")
-        self._sep_1.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_1 = QLabel("·")
+        self._sep_1.setStyleSheet("color: #5a5a5a; font-size: 22px;")
         tb_lay.addWidget(self._sep_1, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._fps_lbl = QLabel("FPS 25.00")
@@ -132,16 +132,16 @@ class PerformanceView(QWidget):
         self._fps_lbl.setStyleSheet("color: #858585;")
         tb_lay.addWidget(self._fps_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_2 = QLabel("|")
-        self._sep_2.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_2 = QLabel("·")
+        self._sep_2.setStyleSheet("color: #5a5a5a; font-size: 22px;")
         tb_lay.addWidget(self._sep_2, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._signal_state_lbl = QLabel("NO SIGNAL")
         self._signal_state_lbl.setFont(mono_font(15, bold=True))
         tb_lay.addWidget(self._signal_state_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_level = QLabel("|")
-        self._sep_level.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_level = QLabel("·")
+        self._sep_level.setStyleSheet("color: #5a5a5a; font-size: 22px;")
         tb_lay.addWidget(self._sep_level, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Visual VU meter — same style as the meter in the main edit window.
@@ -153,8 +153,8 @@ class PerformanceView(QWidget):
         self._signal_level_lbl.setStyleSheet("color: #7a7a7a;")
         tb_lay.addWidget(self._signal_level_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._sep_3 = QLabel("|")
-        self._sep_3.setStyleSheet("color: #3d3d3d; font-size: 18px;")
+        self._sep_3 = QLabel("·")
+        self._sep_3.setStyleSheet("color: #5a5a5a; font-size: 22px;")
         tb_lay.addWidget(self._sep_3, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._clock_lbl = QLabel("")
