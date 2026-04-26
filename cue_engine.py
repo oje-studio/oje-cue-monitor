@@ -202,12 +202,6 @@ class CueEngine:
 
     # ── queries ───────────────────────────────────────────────────────────────
 
-    # Seconds after a cue's TC during which we still show it as "current"
-    # when there is no following cue in the list. With a successor cue
-    # present, "current" naturally hands off to it; without one, this
-    # caps how long the last fired cue keeps the screen.
-    _LAST_CUE_HOLD_SECONDS = 30
-
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
         """
         Non-linear cue triggering — cues are matched purely by timecode,
@@ -216,12 +210,10 @@ class CueEngine:
         cues share the same timecode, the later one in list order wins
         (matches the duplicate-TC warning shown in the editor).
 
-        Edge case: if the playhead has run past every cue's timecode and
-        there's no next cue queued in list order, we still hold the last
-        fired cue on screen for _LAST_CUE_HOLD_SECONDS so the operator
-        can confirm it landed. After that the engine reports None and
-        the UI shows "No cue at this timecode" — useful for shows where
-        LTC keeps running long after the last cue fires.
+        End-of-show rule: if the playhead has run past every cue and
+        there's no next cue queued, current immediately becomes None so
+        the UI shows "No cue at this timecode". The last cue is no
+        longer held on screen.
         """
         self._prev_frames = tc_frames
         best_idx = -1
@@ -236,14 +228,11 @@ class CueEngine:
         if not (0 <= best_idx < len(self.cues)):
             return None
 
-        # Hold-then-release: only enforce the timeout when there's no
-        # next cue in list order. With a queued next cue the show's
-        # running normally and the current should persist.
-        if self._has_next_cue_after(best_idx):
-            return self.cues[best_idx]
-        elapsed_frames = tc_frames - best_frames
-        hold_frames = self._LAST_CUE_HOLD_SECONDS * (self.fps or 25.0)
-        if elapsed_frames > hold_frames:
+        # If there's no next cue queued in list order AND the playhead
+        # has moved past the matched cue's exact frame, treat the show
+        # as ended — operators don't want a stale "current" cue lingering
+        # after the LTC has run past the last hit.
+        if not self._has_next_cue_after(best_idx) and tc_frames > best_frames:
             return None
         return self.cues[best_idx]
 
