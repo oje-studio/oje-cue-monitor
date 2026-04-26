@@ -13,6 +13,8 @@ from typing import Optional, List, Dict, Set
 
 from aiohttp import web
 
+from ui.theme import to_css_vars
+
 logger = logging.getLogger(__name__)
 
 AUTH_COOKIE = "oje_remote_auth"
@@ -282,6 +284,7 @@ def _render_page(
         else "Choose operator name and tap ENTER REMOTE to open the live cue view."
     )
     password_placeholder = "Password from the Mac remote window" if password_required else ""
+    css_root = to_css_vars()
 
     return f"""<!DOCTYPE html>
 <html>
@@ -292,6 +295,7 @@ def _render_page(
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>{title}</title>
 <style>
+{css_root}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{
     background: #000;
