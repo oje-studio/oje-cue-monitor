@@ -1051,7 +1051,14 @@ Generated {html.escape(generated_at)} ·
             # Show operator panel if operators are defined
             if self._show_settings.operator_names:
                 self._op_panel.setVisible(True)
-            self._table_splitter.setSizes([70, 30])
+            # 70 / 30 — table is the primary area, panel is the side helper.
+            # setSizes wants absolute pixels (not percentages), and a tiny
+            # [70, 30] gets reshuffled by minimum-size constraints into a
+            # weird "panel takes everything" state. Compute from real width.
+            total = self._table_splitter.width() or 1280
+            self._table_splitter.setSizes(
+                [int(total * 0.70), int(total * 0.30)]
+            )
             row = self._table.currentRow()
             if 0 <= row < len(self._engine.cues):
                 cue = self._engine.cues[row]
