@@ -168,7 +168,12 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        operator = request.cookies.get(OP_COOKIE, "")
+        # Operator filter resolves from `?op=Name` first (so phone users can
+        # bookmark e.g. http://.../?op=Lighting and skip the picker), then
+        # the cookie set by the desktop /auth flow, then empty.
+        op_query = request.query.get("op", "")
+        op_cookie = request.cookies.get(OP_COOKIE, "")
+        operator = (op_query or op_cookie).strip()
         html = _render_page(
             operator if operator in self._operator_names else "",
             self._operator_names,
@@ -642,12 +647,11 @@ body {{
     .statusbar .clock {{ min-width: 0; }}
     .vu {{ height: 14px; gap: 1px; }}
     .vu .bar {{ width: 7px; }}
-    .access-pill {{
-        top: calc(env(safe-area-inset-top, 0px) + 4px);
-        right: calc(env(safe-area-inset-right, 0px) + 8px);
-        padding: 3px 9px;
-        font-size: 10px;
-    }}
+    /* Hide Access on phones — it overlapped the clock on the right.
+       Operators on phone can lock to a specific operator via the URL
+       parameter (e.g. http://192.168.0.x:8080/?op=Lighting), so the
+       picker UI isn't strictly needed in this view. */
+    .access-pill {{ display: none; }}
     .main {{
         padding: 16px;
         gap: 8px;
