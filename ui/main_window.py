@@ -1103,8 +1103,8 @@ tr.section td {{
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
 
-        from PyQt6.QtCore import QMarginsF, QUrl
-        from PyQt6.QtGui import QImage, QPageLayout
+        from PyQt6.QtCore import QMarginsF, QRectF, QSizeF, QUrl
+        from PyQt6.QtGui import QImage, QPageLayout, QPainter
 
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
@@ -1115,17 +1115,19 @@ tr.section td {{
             QPageLayout.Orientation.Landscape if opts["landscape"]
             else QPageLayout.Orientation.Portrait
         )
-        page_layout.setMargins(QMarginsF(14.0, 12.0, 14.0, 12.0))
+        # Spec: 15 mm margins on every side, regardless of orientation.
+        page_layout.setMargins(QMarginsF(15.0, 15.0, 15.0, 15.0))
         page_layout.setUnits(QPageLayout.Unit.Millimeter)
         printer.setPageLayout(page_layout)
 
         doc = QTextDocument()
-        # Register the studio logo (if any) as a Qt resource the HTML can
-        # reference via <img src='logo'>. QImage handles the actual bytes;
-        # the HTML stays generic so we don't have to base64-encode in the
-        # template.
-        logo_path = self._show_settings.logo_path or ""
-        if logo_path and os.path.exists(logo_path):
+        # Register the resolved logo as a Qt resource the HTML can
+        # reference via <img src='logo'> (when the header overlay
+        # in P5c lands).  Falls back to the assets/public scan so a
+        # build-time logo on disk is picked up even without an
+        # explicit setting.
+        logo_path = _find_logo_path(self._show_settings)
+        if logo_path:
             img = QImage(logo_path)
             if not img.isNull():
                 doc.addResource(
@@ -1137,14 +1139,51 @@ tr.section td {{
             include_notes=opts["include_notes"],
             page_break_per_section=opts["page_break_per_section"],
         ))
+
+        # Manual page loop instead of doc.print(printer).  Identical
+        # output today, but P5b/c will inject per-page header/footer
+        # overlays here — and doc.print() doesn't expose a per-page
+        # paint hook.  Pattern is the standard one Qt docs describe:
+        #   * tell the doc its page size in printer device pixels,
+        #   * begin a QPainter on the printer,
+        #   * for each page translate by -i * page_height and call
+        #     drawContents(), then printer.newPage() between pages.
+        painter = QPainter()
+        if not painter.begin(printer):
+            QMessageBox.critical(self, "PDF Export Error",
+                                 "Could not start the PDF printer.")
+            return
         try:
-            doc.print(printer)
-            QMessageBox.information(
-                self, "PDF Exported",
-                f"Exported printable cue sheet to:\n{path}"
+            # Without setPaintDevice the doc lays out at screen DPI
+            # and a printer page (~10 000 device px tall at 1200 dpi)
+            # fits the entire show on one page — pageCount returns 1
+            # and pages 2+ never get drawn.  Setting the paint device
+            # locks layout to the printer's resolution so pt-sized
+            # text and the page rect agree.
+            doc.documentLayout().setPaintDevice(printer)
+
+            page_rect_dp = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
+            doc.setPageSize(page_rect_dp.size())
+            page_count = max(doc.pageCount(), 1)
+            full_doc_rect = QRectF(
+                0, 0, page_rect_dp.width(),
+                page_rect_dp.height() * page_count,
             )
-        except Exception as e:
-            QMessageBox.critical(self, "PDF Export Error", str(e))
+
+            for i in range(page_count):
+                if i > 0:
+                    printer.newPage()
+                painter.save()
+                painter.translate(0, -i * page_rect_dp.height())
+                doc.drawContents(painter, full_doc_rect)
+                painter.restore()
+        finally:
+            painter.end()
+
+        QMessageBox.information(
+            self, "PDF Exported",
+            f"Exported printable cue sheet to:\n{path}"
+        )
 
     # ── Settings ──────────────────────────────────────────────────────────────
 
