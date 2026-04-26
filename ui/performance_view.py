@@ -412,7 +412,7 @@ class PerformanceView(QWidget):
             f"color: {theme.TEXT_PRIMARY}; "
             f"border: 1px solid {theme.BORDER}; "
             f"border-radius: {theme.RADIUS_MD}px; padding: 0 14px; "
-            "font-size: 12px; font-weight: 600; letter-spacing: 2px; }}"
+            "font-size: 12px; font-weight: 600; letter-spacing: 2px; }"
             f"QPushButton:hover {{ background: #2e2e2e; "
             f"border-color: {theme.BORDER_STRONG}; }}"
             f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
