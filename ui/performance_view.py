@@ -243,22 +243,32 @@ class PerformanceView(QWidget):
         root.addWidget(div)
 
         # ── Next cue (35%) ───────────────────────────────────────────────────
+        # Slightly lighter than the current-cue band above (a-hair-of
+        # surface, not pure black) so the boundary between CURRENT and
+        # UP NEXT reads even on a slightly mis-calibrated stage
+        # monitor.  Same overall vocabulary as the rest of the dark
+        # UI — no longer a #050505 one-off.
         next_w = QWidget()
-        next_w.setStyleSheet("background: #050505;")
+        next_w.setStyleSheet(f"background: {theme.BG_APP};")
         next_lay = QVBoxLayout(next_w)
         next_lay.setContentsMargins(64, 16, 64, 16)
         next_lay.setSpacing(6)
 
         nr = QHBoxLayout()
-        self._next_tag = QLabel("NEXT")
+        # "UP NEXT" reads more conversationally than the bare "NEXT"
+        # tag the operator scans past.  Lifted from theme.TEXT_DIM so
+        # it's visible without competing for attention.
+        self._next_tag = QLabel("UP NEXT")
         self._next_tag.setStyleSheet(
-            "color: #3a3a3a; font-size: 11px; font-weight: bold; letter-spacing: 3px;"
+            f"color: {theme.TEXT_DIM}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 3px;"
         )
         nr.addWidget(self._next_tag)
 
         self._next_group = QLabel("")
         self._next_group.setStyleSheet(
-            "color: #4a4a7a; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+            f"color: {theme.SEMANTIC_INFO}; font-size: 11px; "
+            "font-weight: 600; letter-spacing: 1px;"
         )
         nr.addWidget(self._next_group)
         nr.addStretch()
@@ -266,7 +276,7 @@ class PerformanceView(QWidget):
         self._countdown_lbl = QLabel("")
         self._f_countdown = mono_font(36, bold=True)
         self._countdown_lbl.setFont(self._f_countdown)
-        self._countdown_lbl.setStyleSheet("color: #ffffff;")
+        self._countdown_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         nr.addWidget(self._countdown_lbl)
 
         next_lay.addLayout(nr)
@@ -276,7 +286,7 @@ class PerformanceView(QWidget):
         self._f_next_name.setPointSize(30)
         self._f_next_name.setBold(True)
         self._next_name.setFont(self._f_next_name)
-        self._next_name.setStyleSheet("color: #cccccc;")
+        self._next_name.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         self._next_name.setWordWrap(True)
         next_lay.addWidget(self._next_name)
 
@@ -284,7 +294,7 @@ class PerformanceView(QWidget):
         self._f_next_desc = QFont()
         self._f_next_desc.setPointSize(16)
         self._next_desc.setFont(self._f_next_desc)
-        self._next_desc.setStyleSheet("color: #555555;")
+        self._next_desc.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         self._next_desc.setWordWrap(True)
         next_lay.addWidget(self._next_desc)
 
@@ -451,7 +461,11 @@ class PerformanceView(QWidget):
 
         if countdown is not None and self._countdown_enabled:
             m, s = divmod(int(countdown), 60)
-            color = "#dc4040" if countdown < 10 else "#ffffff"
+            # Sub-10-second countdown flips to the danger hue,
+            # matching the imminent-countdown treatment in the
+            # main-window CueCard (c5).  Same colour, same meaning.
+            color = (theme.SEMANTIC_DANGER if countdown < 10
+                     else theme.TEXT_BRIGHT)
             self._countdown_lbl.setText(f"{m:02d}:{s:02d}")
             self._countdown_lbl.setStyleSheet(f"color: {color};")
         else:
