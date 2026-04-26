@@ -452,7 +452,14 @@ class CueTable(QTableWidget):
                 continue
 
             is_current = current_cue is not None and cue.index == current_cue.index
-            is_past    = current_cue is not None and row < (current_cue.index - 1) and not is_current
+            # "Past" by timecode, not by list row. Non-linear cue ordering
+            # means a cue further down the list can be in the past
+            # (smaller timecode) and one near the top can be in the future.
+            is_past = (
+                cue.has_timecode
+                and not is_current
+                and cue.frames <= current_frames
+            )
             is_dup     = row in self._duplicate_rows
             is_dup_hl  = row in self._highlighted_siblings
             custom_bg  = _named_bg(cue.color) if cue.color else None

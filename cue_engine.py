@@ -203,27 +203,42 @@ class CueEngine:
     # ── queries ───────────────────────────────────────────────────────────────
 
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
+        """
+        Non-linear cue triggering — cues are matched purely by timecode,
+        not by list order. The "current" cue is the one whose timecode is
+        most recently passed (largest frames value <= tc_frames). When two
+        cues share the same timecode, the later one in list order wins
+        (matches the duplicate-TC warning shown in the editor).
+        """
         self._prev_frames = tc_frames
-        last_match = -1
+        best_idx = -1
+        best_frames = -1
         for i, cue in enumerate(self.cues):
             if cue.is_divider or not cue.has_timecode:
                 continue
-            if cue.frames <= tc_frames:
-                last_match = i
-            else:
-                break
-        self._active_index = last_match
-        if 0 <= self._active_index < len(self.cues):
-            return self.cues[self._active_index]
+            if cue.frames <= tc_frames and cue.frames >= best_frames:
+                best_idx = i
+                best_frames = cue.frames
+        self._active_index = best_idx
+        if 0 <= best_idx < len(self.cues):
+            return self.cues[best_idx]
         return None
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
-        start = self._active_index + 1 if self._active_index >= 0 else 0
-        for i in range(start, len(self.cues)):
-            cue = self.cues[i]
+        """
+        Earliest cue strictly in the future, regardless of list order. Ties
+        on timecode break to the first one in list order.
+        """
+        best_idx = -1
+        best_frames = -1
+        for i, cue in enumerate(self.cues):
             if cue.is_divider or not cue.has_timecode:
                 continue
-            return cue
+            if cue.frames > tc_frames and (best_frames < 0 or cue.frames < best_frames):
+                best_idx = i
+                best_frames = cue.frames
+        if 0 <= best_idx < len(self.cues):
+            return self.cues[best_idx]
         return None
 
     def get_countdown(self, tc_frames: int) -> Optional[float]:
