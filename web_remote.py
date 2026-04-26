@@ -487,7 +487,7 @@ body {{
 }}
 .op-comment {{
     font-size: clamp(15px, 3vw, 22px);
-    color: #e6c840;
+    color: var(--text-bright);
     word-wrap: break-word;
     white-space: pre-wrap;
     line-height: 1.35;
@@ -553,13 +553,12 @@ body {{
 }}
 .next-op {{
     font-size: clamp(11px, 2.2vw, 14px);
-    color: #e6c840;
-    font-style: italic;
+    color: var(--text-bright);
+    font-style: normal;
     white-space: pre-wrap;
 }}
 .next-op-name {{
     /* Per-operator semantic colour set inline by renderNextOps. */
-    font-style: normal;
     font-weight: 700;
     letter-spacing: 0.5px;
 }}
