@@ -193,7 +193,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME}  {VERSION}")
+        self._base_title = f"{APP_NAME}  {VERSION}"
+        self.setWindowTitle(self._base_title)
         self.setMinimumSize(900, 640)
 
         self._qsettings       = QSettings("OJEStudio", "OJECueMonitor")
@@ -497,7 +498,7 @@ class MainWindow(QMainWindow):
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
             name = os.path.basename(last_show) if last_show else "Recovered Show"
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {name}  [recovered]")
             # Keep the autosave file around until the user performs a real
             # save — the loaded state is unsaved as far as the original .ojeshow
             # is concerned, but the autosave file on disk already reflects it.
@@ -624,7 +625,8 @@ class MainWindow(QMainWindow):
         self._engine.cues.clear()
         self._table.load_cues(self._engine.cues)
         self._apply_settings(self._show_settings)
-        self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  New Show")
+        self._mark_clean()
+        self._set_base_title(f"{APP_NAME}  {VERSION}  —  New Show")
         self._clear_autosave()
         logger.info("New show created")
 
@@ -653,7 +655,8 @@ class MainWindow(QMainWindow):
             self._engine.load_show_cues(self._show.cues)
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._mark_clean()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._qsettings.setValue("last_show", path)
             self._clear_autosave()
         except (OSError, ValueError) as e:
@@ -666,7 +669,9 @@ class MainWindow(QMainWindow):
             self._engine.load_show_cues(self._show.cues)
             self._table.load_cues(self._engine.cues)
             self._apply_settings(self._show_settings)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)} (imported)")
+            # Treat freshly imported as dirty — they need to Save As to persist.
+            self._mark_dirty()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)} (imported)")
             self._clear_autosave()
         except (OSError, CueParseError) as e:
             QMessageBox.critical(self, "Import Error", str(e))
@@ -693,7 +698,8 @@ class MainWindow(QMainWindow):
         try:
             self._show.save(path)
             self._qsettings.setValue("last_show", path)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._mark_clean()
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._flash_save_ok()
             self._clear_autosave()
             logger.info("Saved to %s", path)
@@ -705,10 +711,11 @@ class MainWindow(QMainWindow):
 
     def _flash_save_ok(self):
         # Save button moved to the File menu — surface the confirmation
-        # via the window title for ~1.5 s instead of a toast.
-        original = self.windowTitle()
-        self.setWindowTitle(f"{original}    ✓ Saved")
-        QTimer.singleShot(1500, lambda t=original: self.setWindowTitle(t))
+        # via the window title for ~1.5 s instead of a toast. Stash and
+        # restore the base title so the dirty marker still works after.
+        saved_base = self._base_title
+        self.setWindowTitle(f"{saved_base}    ✓ Saved")
+        QTimer.singleShot(1500, self._refresh_window_title)
 
     def _save_show_as(self) -> bool:
         if self._show is None:
@@ -726,7 +733,7 @@ class MainWindow(QMainWindow):
         try:
             self._show.save(path)
             self._qsettings.setValue("last_show", path)
-            self.setWindowTitle(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
+            self._set_base_title(f"{APP_NAME}  {VERSION}  —  {os.path.basename(path)}")
             self._clear_autosave()
             logger.info("Saved as %s", path)
             return True
@@ -1488,7 +1495,7 @@ Generated {html.escape(generated_at)}<br>
             os.remove(self._autosave_path())
         except OSError:
             pass
-        self._dirty = False
+        self._mark_clean()
         self._autosave_fresh = True
 
     def _mark_dirty(self):
@@ -1496,6 +1503,20 @@ Generated {html.escape(generated_at)}<br>
             self._log("dirty marked (was clean)")
         self._dirty = True
         self._autosave_fresh = False
+        self._refresh_window_title()
+
+    def _mark_clean(self):
+        self._dirty = False
+        self._refresh_window_title()
+
+    def _set_base_title(self, title: str):
+        """Stash the canonical title; refresh applies the * marker."""
+        self._base_title = title
+        self._refresh_window_title()
+
+    def _refresh_window_title(self):
+        base = getattr(self, "_base_title", f"{APP_NAME}  {VERSION}")
+        self.setWindowTitle(("• " + base) if self._dirty else base)
 
     def _autosave_exists(self) -> bool:
         try:
