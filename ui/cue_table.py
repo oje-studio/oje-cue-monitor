@@ -727,22 +727,39 @@ class CueEditToolbar(QWidget):
     def __init__(self, table: CueTable, parent=None):
         super().__init__(parent)
         self.setFixedHeight(38)
-        self.setStyleSheet("background: #1a1a1a; border-bottom: 1px solid #3c3c3c;")
+        self.setStyleSheet(
+            "QWidget { background: #1a1a1a; border-bottom: 1px solid #3c3c3c; }"
+            # Square iconish buttons that sit close together — a
+            # mini-toolbar rather than a row of word buttons.
+            "QPushButton {"
+            "  background: #232323; color: #d8d8d8;"
+            "  border: 1px solid #3a3a3a; border-radius: 4px;"
+            "  font-size: 16px; padding: 0;"
+            "}"
+            "QPushButton:hover { background: #2c2c2c; border-color: #4a4a4a; }"
+            "QPushButton:pressed { background: #1a1a1a; }"
+        )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 4, 10, 4)
-        lay.setSpacing(6)
+        lay.setSpacing(4)
 
         def btn(label: str, slot, tip: str = "") -> QPushButton:
             b = QPushButton(label)
-            b.setFixedHeight(26)
+            b.setFixedSize(30, 28)
             b.setToolTip(tip)
             b.clicked.connect(slot)
             lay.addWidget(b)
             return b
 
-        btn("+ Cue",     table.add_row_after_selected,     "Add cue after selection")
-        btn("+ Section", table.add_divider_after_selected, "Add section divider")
-        btn("Delete",    table.delete_selected_rows,       "Delete selected rows")
-        btn("Up",        table.move_selected_up,           "Move row up")
-        btn("Down",      table.move_selected_down,         "Move row down")
+        # Compact glyph toolbar — labels live in tooltips so the bar
+        # stays short and the icon meaning is always one hover away.
+        btn("＋",  table.add_row_after_selected,     "Add cue after selection")
+        btn("§",  table.add_divider_after_selected, "Add section divider")
+        btn("✕",  table.delete_selected_rows,       "Delete selected rows")
+
+        # Tiny separator gap before the move-row buttons so they read
+        # as a related pair.
+        lay.addSpacing(8)
+        btn("▲",  table.move_selected_up,            "Move row up")
+        btn("▼",  table.move_selected_down,          "Move row down")
         lay.addStretch()
