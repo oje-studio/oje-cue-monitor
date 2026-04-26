@@ -317,24 +317,10 @@ class MainWindow(QMainWindow):
         self._header_logo = QLabel()
         self._header_logo.setVisible(False)
         hl.addWidget(self._header_logo)
-
-        hl.addWidget(_vline())
-
-        # Transport controls live in the header top-right so they sit
-        # where the operator's eyes already are when reading timecode.
-        self._btn_perf = QPushButton("⛶  PERFORMANCE")
-        self._btn_perf.setFixedHeight(30)
-        self._btn_perf.setFixedWidth(130)
-        self._btn_perf.setStyleSheet(_perf_btn_style())
-        self._btn_perf.clicked.connect(self._enter_perf_mode)
-        hl.addWidget(self._btn_perf)
-
-        self._btn_start = QPushButton("●  START")
-        self._btn_start.setFixedHeight(30)
-        self._btn_start.setFixedWidth(72)
-        self._btn_start.setStyleSheet(_start_btn_style())
-        self._btn_start.clicked.connect(self._toggle_start)
-        hl.addWidget(self._btn_start)
+        # Header now ends here — Performance and Start moved to the
+        # footer alongside Edit Cues / Remote so the operator sees one
+        # clean monitoring strip on top and one action strip at the
+        # bottom (instead of mixing both in the header).
 
         root.addWidget(header)
         root.addWidget(_hline())
@@ -386,40 +372,65 @@ class MainWindow(QMainWindow):
         root.addWidget(_hline())
 
         # ── Footer ────────────────────────────────────────────────────────────
+        from ui.icons import make_icon, icon_size
+
         footer = QWidget()
-        footer.setFixedHeight(48)
+        footer.setFixedHeight(56)
         footer.setStyleSheet(f"background: {NEAR_BLACK.name()};")
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(12, 0, 12, 0)
         fl.setSpacing(8)
 
-        # File / Settings / Help live in the native menu bar (built in
-        # _build_menu_bar). The footer keeps only the two actions the
-        # operator toggles during a show — everything else is one-shot
-        # and belongs in the menu.
-        self._btn_edit = QPushButton("✎  Edit Cues")
-        self._btn_edit.setFixedHeight(30)
+        # ── Left cluster: Edit Cues ──────────────────────────────────
+        # Show prep lives on the left — the operator does this before
+        # the show starts and may dip back in mid-show to tweak notes.
+        self._btn_edit = QPushButton(" Edit Cues")
+        self._btn_edit.setIcon(make_icon("edit", "#dadada"))
+        self._btn_edit.setIconSize(icon_size(16))
+        self._btn_edit.setFixedHeight(34)
         self._btn_edit.setCheckable(True)
         self._btn_edit.clicked.connect(self._toggle_edit_mode)
         fl.addWidget(self._btn_edit)
 
-        self._btn_remote = QPushButton("⌘  Remote")
-        self._btn_remote.setFixedHeight(30)
+        fl.addStretch()
+
+        # ── Right cluster: Remote → Performance → START ──────────────
+        # Reads left-to-right as the show-startup order:
+        #   Remote   — let the team's phones connect
+        #   Performance — bring the operator screen up
+        #   START    — arm LTC and run the show
+        self._btn_remote = QPushButton(" Remote")
+        self._btn_remote.setIcon(make_icon("remote", "#dadada"))
+        self._btn_remote.setIconSize(icon_size(16))
+        self._btn_remote.setFixedHeight(34)
         self._btn_remote.setToolTip("Start/stop web remote for other devices")
         self._btn_remote.setCheckable(True)
         self._btn_remote.clicked.connect(self._toggle_remote)
         fl.addWidget(self._btn_remote)
 
-        fl.addStretch()
+        self._btn_perf = QPushButton(" Performance")
+        self._btn_perf.setIcon(make_icon("fullscreen", "#dadada"))
+        self._btn_perf.setIconSize(icon_size(16))
+        self._btn_perf.setFixedHeight(34)
+        self._btn_perf.setStyleSheet(_perf_btn_style())
+        self._btn_perf.clicked.connect(self._enter_perf_mode)
+        fl.addWidget(self._btn_perf)
 
-        cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}  ·  {EMAIL}")
-        cr_lbl.setStyleSheet(f"color: {QColor(75,75,75).name()}; font-size: 10px;")
-        fl.addWidget(cr_lbl)
+        # START is THE primary action — visually distinct (taller, wider,
+        # accent-coloured icon) so the eye lands on it first.
+        self._btn_start = QPushButton(" START")
+        self._btn_start.setIcon(make_icon("record", "#ffffff"))
+        self._btn_start.setIconSize(icon_size(18))
+        self._btn_start.setFixedHeight(40)
+        self._btn_start.setMinimumWidth(110)
+        self._btn_start.setStyleSheet(_start_btn_style())
+        self._btn_start.clicked.connect(self._toggle_start)
+        fl.addWidget(self._btn_start)
 
-        fl.addWidget(_vline())
+        fl.addSpacing(10)
 
-        # Wall clock moved down here from the header — still visible for the
-        # operator tracking intermission / break times, but out of the way.
+        # Wall clock — small, dim, far right. Useful for tracking
+        # intermission / break time without drawing the eye.
         self._clock_label = QLabel("")
         self._clock_label.setFont(mono_font(11))
         self._clock_label.setStyleSheet(f"color: {TEXT_DIM.name()};")
@@ -1116,7 +1127,9 @@ Generated {html.escape(generated_at)}<br>
         self._web_remote.set_operators(self._show_settings.operator_names)
         self._web_remote.set_remote_password(self._show_settings.remote_password)
         self._web_remote.start()
-        self._btn_remote.setText("⌘  Remote ON")
+        self._btn_remote.setText(" Remote ON")
+        from ui.icons import make_icon
+        self._btn_remote.setIcon(make_icon("remote", "#ffffff"))
         self._btn_remote.setStyleSheet(
             f"QPushButton {{ background: {QColor(48,100,160).name()}; "
             f"color: white; border-radius: 4px; }}"
@@ -1128,7 +1141,9 @@ Generated {html.escape(generated_at)}<br>
         if self._web_remote:
             self._web_remote.stop()
             self._web_remote = None
-        self._btn_remote.setText("⌘  Remote")
+        self._btn_remote.setText(" Remote")
+        from ui.icons import make_icon
+        self._btn_remote.setIcon(make_icon("remote", "#dadada"))
         self._btn_remote.setStyleSheet("")
         logger.info("Web remote stopped")
 
@@ -1156,7 +1171,9 @@ Generated {html.escape(generated_at)}<br>
         self._table.set_edit_mode(checked)
         self._edit_toolbar.setVisible(checked)
         if checked:
-            self._btn_edit.setText("✓  Done")
+            self._btn_edit.setText(" Done")
+            from ui.icons import make_icon
+            self._btn_edit.setIcon(make_icon("check", "#dadada"))
             self._btn_edit.setStyleSheet(
                 f"QPushButton {{ background: {QColor(52,120,52).name()}; "
                 f"color: white; border-radius: 4px; }}"
@@ -1178,7 +1195,9 @@ Generated {html.escape(generated_at)}<br>
                 if not cue.is_divider:
                     self._op_panel.show_for_cue(row, cue)
         else:
-            self._btn_edit.setText("✎  Edit Cues")
+            self._btn_edit.setText(" Edit Cues")
+            from ui.icons import make_icon
+            self._btn_edit.setIcon(make_icon("edit", "#dadada"))
             self._btn_edit.setStyleSheet("")
             self._op_panel.hide_panel()
             self._table_splitter.setSizes([1280, 0])
@@ -1295,7 +1314,9 @@ Generated {html.escape(generated_at)}<br>
 
         self._running = True
         self._poll_timer.start()
-        self._btn_start.setText("◼  STOP")
+        self._btn_start.setText(" STOP")
+        from ui.icons import make_icon
+        self._btn_start.setIcon(make_icon("stop", "#ffffff"))
         self._btn_start.setStyleSheet(_stop_btn_style())
         self._live_label.setVisible(True)
 
@@ -1306,7 +1327,9 @@ Generated {html.escape(generated_at)}<br>
         self._running = False
         self._poll_timer.stop()
         self._blink_timer.stop()
-        self._btn_start.setText("●  START")
+        self._btn_start.setText(" START")
+        from ui.icons import make_icon
+        self._btn_start.setIcon(make_icon("record", "#ffffff"))
         self._btn_start.setStyleSheet(_start_btn_style())
         self._live_label.setVisible(False)
         self._signal_ok = False
