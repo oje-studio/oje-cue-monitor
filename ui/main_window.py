@@ -928,18 +928,32 @@ class MainWindow(QMainWindow):
                     color = op_color(op_name)
                     safe_name = html.escape(op_name).upper()
                     safe_comment = html.escape(comment).replace(chr(10), "<br>")
-                    # QTextDocument's HTML doesn't honour grid/flex,
-                    # so each note is a small two-cell sub-table —
-                    # label fixed-width, text wrapping freely.
+                    # QTextDocument doesn't honour grid/flex/inline-
+                    # block reliably, so each note is a small
+                    # two-cell sub-table.  The first commit emitted
+                    # the column widths via inline `width:52pt` on
+                    # the <td> — Qt's HTML renderer ignored it and
+                    # collapsed the column to its content, so the
+                    # label and the comment text touched with no
+                    # gap (LIGHTINGFade to warm wash).  A <colgroup>
+                    # with explicit <col> widths IS honoured —
+                    # same trick the outer cues table uses.
                     note_lines.append(
-                        f"<table style=\"width:100%; border-collapse:collapse; "
-                        f"margin-bottom: 3pt;\"><tr>"
-                        f"<td style=\"width:52pt; vertical-align:top; "
-                        f"padding:1pt 6pt 0 0; "
+                        "<table style=\"width:100%; "
+                        "border-collapse:collapse; "
+                        "margin-bottom: 3pt;\">"
+                        "<colgroup>"
+                        "<col style=\"width:60pt;\">"
+                        "<col>"
+                        "</colgroup>"
+                        "<tr>"
+                        f"<td style=\"vertical-align:top; "
+                        f"padding-top:1pt; "
                         f"font-size:7.5pt; font-weight:700; color:{color}; "
                         f"letter-spacing:0.4pt; white-space:nowrap;\">"
                         f"{safe_name}</td>"
                         f"<td style=\"vertical-align:top; "
+                        f"padding-left:8pt; padding-top:1pt; "
                         f"font-size:10pt; color:#2a2a2a; line-height:1.5;\">"
                         f"{safe_comment}</td>"
                         f"</tr></table>"
@@ -2273,13 +2287,23 @@ def _paint_pdf_header(painter, page_w_dp: float, header_h_dp: float,
 
     # ── Left: logo ────────────────────────────────────────────────
     if logo_pixmap is not None and not logo_pixmap.isNull():
-        max_logo_h = 36 * pt_to_dp
-        scaled = logo_pixmap.scaledToHeight(
-            int(max_logo_h),
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        ly = (header_h_dp - scaled.height()) / 2
-        painter.drawPixmap(int(left_x), int(ly), scaled)
+        # Use the rect-based drawPixmap overload so Qt scales the
+        # source pixmap into a precisely sized target rectangle.
+        # The previous attempt called scaledToHeight() and then drew
+        # at native pixmap pixel coords — Qt's printer painter
+        # interprets pixmap pixel coords through the device pixel
+        # ratio, which inflated the source 1024×1024 logo back up
+        # past the header band.  Drawing into an explicit
+        # device-pixel target rect bypasses that.
+        target_h = 36 * pt_to_dp
+        # Preserve aspect ratio.
+        if logo_pixmap.height() > 0:
+            target_w = logo_pixmap.width() * (target_h / logo_pixmap.height())
+        else:
+            target_w = target_h
+        ly = (header_h_dp - target_h) / 2
+        target = QRectF(left_x, ly, target_w, target_h)
+        painter.drawPixmap(target, logo_pixmap, QRectF(logo_pixmap.rect()))
 
     # ── Centre: title block ───────────────────────────────────────
     centre_rect = QRectF(centre_x, pad_y, centre_w, inner_h)
