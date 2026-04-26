@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Dict, Optional
 
 import html
 import logging
@@ -15,7 +15,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtPrintSupport import QPrinter
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QCheckBox, QDialogButtonBox, QFormLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QFileDialog, QMessageBox,
     QFrame, QStackedWidget, QDialog, QSplitter,
 )
@@ -755,33 +756,44 @@ class MainWindow(QMainWindow):
             return stem.replace("_", " ")
         return "Untitled Show"
 
-    def _build_pdf_html(self) -> str:
+    def _build_pdf_html(self, include_notes: bool = True,
+                        page_break_per_section: bool = False) -> str:
         operator_names = list(self._show_settings.operator_names or [])
         show_name = self._current_show_title()
         generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
         cue_count = sum(1 for c in self._engine.cues if not c.is_divider)
+        n_cols = 4 if include_notes else 3
 
         rows = []
+        seen_section = False
         for cue in self._engine.cues:
             if cue.is_divider:
+                # Page break before EVERY section except the first one
+                # (otherwise the cover page is just an empty header).
+                br_style = ""
+                if page_break_per_section and seen_section:
+                    br_style = " style=\"page-break-before: always;\""
+                seen_section = True
                 rows.append(
-                    "<tr class='section'>"
-                    f"<td colspan='4'>{html.escape(cue.name or 'SECTION')}</td>"
+                    f"<tr class='section'{br_style}>"
+                    f"<td colspan='{n_cols}'>{html.escape(cue.name or 'SECTION')}</td>"
                     "</tr>"
                 )
                 continue
 
-            notes_parts = []
-            for op_name in operator_names:
-                comment = cue.operator_comments.get(op_name, "")
-                if comment:
-                    notes_parts.append(
-                        f"<div class='note'>"
-                        f"<span class='note-name'>{html.escape(op_name)}</span> "
-                        f"{html.escape(comment).replace(chr(10), '<br>')}"
-                        f"</div>"
-                    )
-            notes_html = "".join(notes_parts) or "<span class='muted'>—</span>"
+            notes_html = ""
+            if include_notes:
+                notes_parts = []
+                for op_name in operator_names:
+                    comment = cue.operator_comments.get(op_name, "")
+                    if comment:
+                        notes_parts.append(
+                            f"<div class='note'>"
+                            f"<span class='note-name'>{html.escape(op_name)}</span> "
+                            f"{html.escape(comment).replace(chr(10), '<br>')}"
+                            f"</div>"
+                        )
+                notes_html = "".join(notes_parts) or "<span class='muted'>—</span>"
 
             color_name = (cue.color or "").strip()
             color_hex = _pdf_color_hex(color_name) if color_name else ""
@@ -798,18 +810,18 @@ class MainWindow(QMainWindow):
                 # QTextDocument's HTML renderer actually applies it.
                 row_style = f" style=\"background:{html.escape(tint_hex)};\""
 
-            rows.append(
-                f"<tr class='{row_class}'{row_style}>"
+            cells = (
                 f"<td class='tc'{tc_style}>{html.escape(cue.timecode or '')}</td>"
                 f"<td class='cue-name'>{html.escape(cue.name or '')}</td>"
                 f"<td class='cue-desc'>{html.escape(cue.description or '')}</td>"
-                f"<td class='cue-notes'>{notes_html}</td>"
-                "</tr>"
             )
+            if include_notes:
+                cells += f"<td class='cue-notes'>{notes_html}</td>"
+            rows.append(f"<tr class='{row_class}'{row_style}>{cells}</tr>")
 
         if not rows:
             rows.append(
-                "<tr><td colspan='4' class='empty'>No cues in show.</td></tr>"
+                f"<tr><td colspan='{n_cols}' class='empty'>No cues in show.</td></tr>"
             )
 
         # Logo: referenced as a Qt resource named "logo" — _export_pdf
@@ -962,12 +974,17 @@ Generated {html.escape(generated_at)}<br>
 </div>
 <table class="cues">
 <thead>
-<tr>
-<th style="width: 12%;">Timecode</th>
-<th style="width: 20%;">Cue</th>
-<th style="width: 28%;">Description</th>
-<th style="width: 40%;">Operator Notes</th>
-</tr>
+{('<tr>'
+  '<th style="width: 12%;">Timecode</th>'
+  '<th style="width: 20%;">Cue</th>'
+  '<th style="width: 28%;">Description</th>'
+  '<th style="width: 40%;">Operator Notes</th>'
+  '</tr>') if include_notes else
+ ('<tr>'
+  '<th style="width: 16%;">Timecode</th>'
+  '<th style="width: 28%;">Cue</th>'
+  '<th style="width: 56%;">Description</th>'
+  '</tr>')}
 </thead>
 <tbody>
 {''.join(rows)}
@@ -977,6 +994,10 @@ Generated {html.escape(generated_at)}<br>
 </html>"""
 
     def _export_pdf(self):
+        opts = _PdfExportDialog.ask(self)
+        if opts is None:
+            return  # cancelled
+
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Cue Sheet PDF", self._default_pdf_export_path(),
             "PDF Files (*.pdf);;All Files (*)"
@@ -992,11 +1013,12 @@ Generated {html.escape(generated_at)}<br>
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(path)
-        # Landscape A4 — gives a wide row to fit timecode, name, description
-        # and operator notes side-by-side without cramping the description.
         page_layout = printer.pageLayout()
         page_layout.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-        page_layout.setOrientation(QPageLayout.Orientation.Landscape)
+        page_layout.setOrientation(
+            QPageLayout.Orientation.Landscape if opts["landscape"]
+            else QPageLayout.Orientation.Portrait
+        )
         page_layout.setMargins(QMarginsF(14.0, 12.0, 14.0, 12.0))
         page_layout.setUnits(QPageLayout.Unit.Millimeter)
         printer.setPageLayout(page_layout)
@@ -1015,7 +1037,10 @@ Generated {html.escape(generated_at)}<br>
                     QUrl("logo"),
                     img,
                 )
-        doc.setHtml(self._build_pdf_html())
+        doc.setHtml(self._build_pdf_html(
+            include_notes=opts["include_notes"],
+            page_break_per_section=opts["page_break_per_section"],
+        ))
         try:
             doc.print(printer)
             QMessageBox.information(
@@ -1658,6 +1683,64 @@ Generated {html.escape(generated_at)}<br>
             self._log("--- session ended ---")
             self._log_file.close()
         event.accept()
+
+
+# ── PDF export options dialog ────────────────────────────────────────────────
+
+class _PdfExportDialog(QDialog):
+    """
+    Small modal asking the operator about per-export choices before we
+    open the file-save dialog. Operator-tunable knobs we deliberately
+    keep small so the dialog stays one screen and isn't a wizard:
+      - paper orientation
+      - whether to include operator notes column
+      - whether to start each section divider on a new page
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export PDF — Options")
+        self.setMinimumWidth(360)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self._cb_landscape = QCheckBox("Landscape (wider rows)")
+        self._cb_landscape.setChecked(True)
+        form.addRow("Paper:", self._cb_landscape)
+
+        self._cb_notes = QCheckBox("Include operator notes column")
+        self._cb_notes.setChecked(True)
+        form.addRow("Content:", self._cb_notes)
+
+        self._cb_page_break = QCheckBox("Start each section on a new page")
+        self._cb_page_break.setChecked(False)
+        form.addRow("Layout:", self._cb_page_break)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Export…")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 14)
+        root.addLayout(form)
+        root.addSpacing(6)
+        root.addWidget(buttons)
+
+    @classmethod
+    def ask(cls, parent) -> Optional[Dict]:
+        dlg = cls(parent)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return {
+            "landscape": dlg._cb_landscape.isChecked(),
+            "include_notes": dlg._cb_notes.isChecked(),
+            "page_break_per_section": dlg._cb_page_break.isChecked(),
+        }
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
