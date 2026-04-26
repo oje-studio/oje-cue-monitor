@@ -168,27 +168,27 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        # How operator filter is resolved depends on whether a password
-        # is configured for the remote:
-        #   * Password mode: trust OP_COOKIE (set by the /auth flow on
-        #     successful login). The user has already paid the cost of
-        #     entering a password and picking an operator; honour that
-        #     across reloads. To switch operator they use Access on
-        #     desktop or log out.
-        #   * No-password mode: ignore the cookie. Every reload starts
-        #     with an empty filter, JS shows the picker, and the user
-        #     re-confirms who they are. This matches the operator's
-        #     expectation that a reload = a fresh "who am I" prompt.
+        # Operator filter source — depends on whether a password is set:
+        #   * Password mode: render with operator empty AND authenticated
+        #     forced to false. Every reload shows the password+operator
+        #     form so the operator can switch identity by hitting
+        #     reload — they wanted "reload = re-pick".
+        #     /ws and /api/state still gate by the auth cookie that /auth
+        #     installed, so the connection itself stays trusted; the
+        #     in-page UI just always asks again.
+        #   * No-password mode: same idea — operator empty, JS shows the
+        #     picker on every load.
         if self._remote_password:
-            op = request.cookies.get(OP_COOKIE, "").strip()
-            operator = op if op in self._operator_names else ""
+            authenticated_for_render = False
+            operator = ""
         else:
+            authenticated_for_render = True
             operator = ""
         html = _render_page(
             operator,
             self._operator_names,
             self.base_url,
-            authenticated=self._is_authenticated(request),
+            authenticated=authenticated_for_render,
             password_required=bool(self._remote_password),
         )
         return web.Response(text=html, content_type="text/html")
@@ -763,11 +763,21 @@ function connect() {{
 
     ws.onopen = () => {{
         document.getElementById('conn-banner').classList.add('hidden');
+        // Belt-and-suspenders for iOS Safari: the server sends the
+        // current state immediately after the upgrade, but on iPhones
+        // we sometimes saw an empty page for a few seconds after a
+        // fresh load — looks like the very first WS frame is missed
+        // while Safari is still wiring things up. Fetch /api/state
+        // explicitly so the cue cards populate even if the initial
+        // push slipped through.
+        fetch('/api/state', {{ credentials: 'same-origin' }})
+            .then(r => r.ok ? r.json() : null)
+            .then(s => {{ if (s) render(s); }})
+            .catch(() => {{}});
     }};
 
     ws.onmessage = (event) => {{
-        const state = JSON.parse(event.data);
-        render(state);
+        try {{ render(JSON.parse(event.data)); }} catch (_e) {{}}
     }};
 
     ws.onclose = () => {{
@@ -962,8 +972,14 @@ async function submitAuth() {{
             return;
         }}
         currentOperator = operator || null;
-        // Reload so the server-rendered page picks up the new auth cookie.
-        window.location.reload();
+        // /auth set the auth cookie — don't reload (server now always
+        // renders the form in password mode, so a reload would just put
+        // the form back on screen). Hide the overlay and open the WS;
+        // the cookie is sent with the WS request, server lets us in.
+        overlay.classList.add('hidden');
+        if (!ws || ws.readyState >= WebSocket.CLOSING) {{
+            connect();
+        }}
     }} catch (_err) {{
         errorEl.textContent = 'Could not reach the remote server.';
     }} finally {{
