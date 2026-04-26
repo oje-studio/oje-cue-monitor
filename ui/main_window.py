@@ -510,13 +510,8 @@ class MainWindow(QMainWindow):
         should proceed with normal startup).
         """
         path = self._autosave_path()
-        reply = QMessageBox.question(
-            self, "Restore Unsaved Changes",
-            "The previous session ended before changes were saved.\n\n"
-            "Restore the autosaved cue list?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        last_name = os.path.basename(last_show) if last_show else ""
+        if not _RecoveryDialog.ask(self, last_name):
             self._clear_autosave()
             return False
 
@@ -1851,6 +1846,95 @@ class _PdfExportDialog(QDialog):
             "include_notes": dlg._cb_notes.isChecked(),
             "page_break_per_section": dlg._cb_page_break.isChecked(),
         }
+
+
+class _RecoveryDialog(QDialog):
+    """
+    Restore-from-autosave prompt shown at startup when the previous
+    session ended without an explicit save.  Replaces the
+    platform-default QMessageBox so the dialog matches the dark
+    surface the operator sees everywhere else in the app.
+    """
+
+    def __init__(self, last_show_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore Unsaved Changes")
+        self.setMinimumWidth(440)
+        self.setStyleSheet(
+            f"QDialog {{ background: {theme.BG_APP}; }}"
+            f"QLabel {{ color: {theme.TEXT_PRIMARY}; }}"
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 18)
+        root.setSpacing(14)
+
+        # Tag — small caps, lifted from theme.SEMANTIC_WARNING so the
+        # operator's eye registers "this is a recovery flow" before
+        # they read the body.  Two-line headline + dim explanation
+        # mirror the empty-state placeholder pattern (b7 / e3).
+        tag = QLabel("AUTOSAVE FOUND")
+        tag.setStyleSheet(
+            f"color: {theme.SEMANTIC_WARNING}; font-size: 11px; "
+            "font-weight: 700; letter-spacing: 2px;"
+        )
+        root.addWidget(tag)
+
+        head = QLabel("The previous session ended before saving.")
+        f_head = QFont(); f_head.setPointSize(15); f_head.setBold(True)
+        head.setFont(f_head)
+        head.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
+        head.setWordWrap(True)
+        root.addWidget(head)
+
+        # Show the original file name when we have one — operator sees
+        # exactly which show is being recovered.  Otherwise the second
+        # paragraph is enough context.
+        if last_show_name:
+            sub = QLabel(
+                f"Restore the autosaved cue list for "
+                f"<b>{html.escape(last_show_name)}</b>?"
+            )
+        else:
+            sub = QLabel("Restore the autosaved cue list?")
+        sub.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 12px;")
+        sub.setTextFormat(Qt.TextFormat.RichText)
+        sub.setWordWrap(True)
+        root.addWidget(sub)
+
+        hint = QLabel(
+            "Discarding clears the autosave and starts with a blank show."
+        )
+        hint.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px;")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        # Action row — Discard left/secondary, Restore right/primary
+        # green so the safe-default sits where the eye lands.
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_discard = QPushButton("Discard")
+        btn_discard.setStyleSheet(_secondary_btn_style())
+        btn_discard.setFixedHeight(32)
+        btn_discard.clicked.connect(self.reject)
+        btn_row.addWidget(btn_discard)
+
+        btn_restore = QPushButton("Restore")
+        btn_restore.setStyleSheet(_start_btn_style())
+        btn_restore.setFixedHeight(32)
+        btn_restore.setMinimumWidth(110)
+        btn_restore.setDefault(True)
+        btn_restore.clicked.connect(self.accept)
+        btn_row.addWidget(btn_restore)
+
+        root.addSpacing(4)
+        root.addLayout(btn_row)
+
+    @classmethod
+    def ask(cls, parent, last_show_name: str = "") -> bool:
+        dlg = cls(last_show_name, parent)
+        return dlg.exec() == QDialog.DialogCode.Accepted
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
