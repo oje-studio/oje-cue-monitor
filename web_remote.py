@@ -278,26 +278,37 @@ def _render_page(
 <title>{title}</title>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-html {{ background: #000; }}
-body {{
+html, body {{
     background: #000;
+    /* iOS Safari ignores overflow:hidden on body for touch scrolling —
+       the page still rubber-bands left/right/up/down when the finger
+       drags. position:fixed + inset:0 + overscroll-behavior:none locks
+       it down properly. Anything that needs to scroll (.main) does so
+       inside its own box, not by moving the whole page. */
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    /* Block accidental two-finger zoom / pinch on the chrome but allow
+       inner scroll regions to handle their own gestures. */
+    touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;
+}}
+body {{
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
     /* svh = "smallest viewport height" — the slice of screen that's
-       always visible, even when iOS Safari's toolbar is showing. Using
-       it (instead of 100dvh) guarantees the bottom strip never lands
-       under the URL bar. The trade-off: a tiny strip of dark space at
-       the bottom when the user scrolls and Safari hides its chrome.
-       That's preferable to content being clipped. */
+       always visible, even when iOS Safari's toolbar is up. Using it
+       guarantees the bottom strip never lands under the URL bar. */
     height: 100vh;
     height: 100svh;
-    overflow: hidden;
-    /* Grid layout — three rows, each owns its space, no flex-shifting
-       when cue text changes length between updates. */
+    /* Three-row grid: top status bar, flexible main, bottom strip.
+       No flex-shifting when cue text changes length between updates. */
     display: grid;
     grid-template-rows: auto 1fr auto;
     grid-template-columns: 100%;
-    /* Honour notch / home-indicator on iPhone */
+    /* Honour notch / home-indicator. Padding lives inside the box-sizing
+       so we never exceed 100 % width and never trigger horizontal scroll. */
     padding-top: env(safe-area-inset-top, 0px);
     padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
