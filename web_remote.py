@@ -461,6 +461,26 @@ body {{
     color: var(--text-muted);
     line-height: 1.35;
 }}
+/* Shown only when state.current_cue is null — same intent as the
+   cue-table empty placeholder (b7) on the desktop, just sized
+   for a phone.  Tone-on-tone, no border, lives in the same flex
+   column so the page doesn't reflow when the first cue arrives. */
+.empty-state {{
+    margin-top: 12px;
+    padding: 32px 0;
+    text-align: center;
+}}
+.empty-state .empty-head {{
+    font-size: clamp(16px, 3.4vw, 22px);
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}}
+.empty-state .empty-sub {{
+    font-size: clamp(12px, 2.2vw, 14px);
+    color: var(--text-dim);
+    margin-top: 4px;
+}}
 .operators {{
     display: grid;
     /* auto-fit so 1/2/3+ operators tile naturally; minmax keeps each
@@ -763,13 +783,17 @@ body {{
 
 <!-- Current cue — owns the flexible row. -->
 <div class="main">
-    <div class="tag-row">
+    <div class="tag-row" id="cur-tag-row">
         <span class="tag">CURRENT CUE</span>
         <span class="group" id="cur-group"></span>
     </div>
     <div class="cue-name" id="cur-name">—</div>
     <div class="cue-desc" id="cur-desc"></div>
     <div class="operators" id="cur-ops"></div>
+    <div class="empty-state hidden" id="cur-empty">
+        <div class="empty-head">Waiting for the show</div>
+        <div class="empty-sub">The current cue will appear here once LTC starts.</div>
+    </div>
 </div>
 
 <!-- Next cue strip — pinned to bottom, fixed minimum height. -->
@@ -940,6 +964,17 @@ function render(state) {{
 
     // ── Current cue ──
     const cur = state.current_cue;
+    // Hide the live cue elements + show empty placeholder when there
+    // is no current cue at all — same idea as the cue-table empty
+    // state on the desktop (b7).  Toggling is done via the .hidden
+    // helper class so we keep one source of truth for "off".
+    const curEmpty = !cur;
+    document.getElementById('cur-empty').classList.toggle('hidden', !curEmpty);
+    document.getElementById('cur-tag-row').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-name').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-desc').classList.toggle('hidden', curEmpty);
+    document.getElementById('cur-ops').classList.toggle('hidden', curEmpty);
+
     const curSig = cur ? (cur.id || '') + '|' + (cur.name || '') + '|' + (cur.description || '') : '';
     if (curSig !== _curCueSig) {{
         _curCueSig = curSig;
