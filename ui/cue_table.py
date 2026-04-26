@@ -976,22 +976,29 @@ class CueEditToolbar(QWidget):
         from ui.icons import make_icon, icon_size
 
         self.setFixedHeight(38)
+        # Toolbar surface + ghost-icon buttons, all token-driven.
+        # Slightly elevated bg (BG_RAISED) so the toolbar reads as
+        # a strip above the cue table; subtle BORDER_SUBTLE bottom
+        # divider rather than the previous loud #3c3c3c rule.
         self.setStyleSheet(
-            "QWidget { background: #1a1a1a; border-bottom: 1px solid #3c3c3c; }"
-            "QPushButton {"
-            "  background: #232323; border: 1px solid #3a3a3a;"
-            "  border-radius: 4px; padding: 0;"
-            "}"
-            "QPushButton:hover { background: #2c2c2c; border-color: #4a4a4a; }"
-            "QPushButton:pressed { background: #1a1a1a; }"
+            f"QWidget {{ background: {theme.BG_HEADER}; "
+            f"border-bottom: 1px solid {theme.BORDER_SUBTLE}; }}"
+            f"QPushButton {{ "
+            f"background: {theme.BG_RAISED}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_SM}px; padding: 0; }}"
+            f"QPushButton:hover {{ background: #2e2e2e; "
+            f"border-color: {theme.BORDER_STRONG}; }}"
+            f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
         )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 4, 10, 4)
         lay.setSpacing(4)
 
-        def btn(icon_name: str, slot, tip: str) -> QPushButton:
+        def btn(icon_name: str, slot, tip: str,
+                icon_color: str = theme.TEXT_PRIMARY) -> QPushButton:
             b = QPushButton()
-            b.setIcon(make_icon(icon_name, "#d8d8d8"))
+            b.setIcon(make_icon(icon_name, icon_color))
             b.setIconSize(icon_size(16))
             b.setFixedSize(30, 28)
             b.setToolTip(tip)
@@ -999,10 +1006,13 @@ class CueEditToolbar(QWidget):
             lay.addWidget(b)
             return b
 
-        # Create / delete trio.
+        # Create / delete trio.  Delete glyph carries the danger
+        # hue so the operator's eye registers the destructive
+        # action even before reading the tooltip.
         btn("plus",    table.add_row_after_selected,     "Add cue after selection")
         btn("section", table.add_divider_after_selected, "Add section divider")
-        btn("x",       table.delete_selected_rows,       "Delete selected rows")
+        btn("x",       table.delete_selected_rows,       "Delete selected rows",
+            icon_color=theme.SEMANTIC_DANGER)
 
         # Move-row pair, separated visually so it reads as a unit.
         lay.addSpacing(8)
