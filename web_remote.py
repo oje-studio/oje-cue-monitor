@@ -535,32 +535,33 @@ body {{
 .overlay {{
     position: fixed;
     inset: 0;
-    background: #0a0a0a;
+    background: var(--bg-app);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    padding: 24px;
-    padding-top: max(24px, env(safe-area-inset-top, 0px));
-    padding-right: max(24px, env(safe-area-inset-right, 0px));
-    padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
-    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding: var(--space-6);
+    padding-top: max(var(--space-6), env(safe-area-inset-top, 0px));
+    padding-right: max(var(--space-6), env(safe-area-inset-right, 0px));
+    padding-bottom: max(var(--space-6), env(safe-area-inset-bottom, 0px));
+    padding-left: max(var(--space-6), env(safe-area-inset-left, 0px));
 }}
 .auth-card {{
     width: min(420px, 100%);
-    background: #111;
-    border: 1px solid #2d2d2d;
-    border-radius: 12px;
-    padding: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
 }}
 .auth-title {{
     font-size: 18px;
-    font-weight: bold;
-    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-3);
 }}
 .auth-copy {{
     font-size: 13px;
-    color: #9a9a9a;
+    color: var(--text-muted);
     margin-bottom: 18px;
     line-height: 1.4;
 }}
@@ -570,20 +571,27 @@ body {{
 .field label {{
     display: block;
     font-size: 11px;
-    color: #7a7a7a;
-    font-weight: bold;
+    color: var(--text-dim);
+    font-weight: 600;
     letter-spacing: 2px;
-    margin-bottom: 6px;
+    margin-bottom: var(--space-2);
 }}
 .field select,
 .field input {{
     width: 100%;
-    border: 1px solid #333;
-    border-radius: 8px;
-    background: #050505;
-    color: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-input);
+    color: var(--text-primary);
     padding: 12px 14px;
     font-size: 15px;
+    -webkit-appearance: none;  /* iOS gradient → flat */
+    appearance: none;
+}}
+.field select:focus,
+.field input:focus {{
+    outline: none;
+    border-color: var(--info);
 }}
 .actions {{
     display: flex;
@@ -592,19 +600,27 @@ body {{
 }}
 .primary-btn,
 .ghost-btn {{
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
     font-size: 14px;
-    color: #fff;
-    background: #1b1b1b;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-bright);
+    background: var(--bg-raised);
+    -webkit-appearance: none;
+    appearance: none;
 }}
 .primary-btn {{
-    background: #2b5ea7;
-    border-color: #2b5ea7;
+    background: var(--action);
+    border-color: var(--action);
+    color: #0a1a10;  /* dark green-ink for contrast on bright green */
+}}
+.primary-btn:active {{
+    background: var(--action-hover);
 }}
 .error {{
-    color: #ff7d7d;
+    color: var(--danger);
     font-size: 12px;
     min-height: 18px;
 }}
