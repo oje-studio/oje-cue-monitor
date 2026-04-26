@@ -758,15 +758,22 @@ class MainWindow(QMainWindow):
             notes_html = "".join(notes_parts) or "<span class='muted'>—</span>"
 
             color_name = (cue.color or "").strip()
+            color_hex = _pdf_color_hex(color_name) if color_name else ""
+            tint_hex = _pdf_color_tint(color_name) if color_name else ""
+
             tc_style = ""
-            if color_name:
-                tc_style = (
-                    f" style=\"border-left: 4pt solid "
-                    f"{html.escape(_pdf_color_hex(color_name))};\""
-                )
+            if color_hex:
+                tc_style = f" style=\"border-left: 6pt solid {html.escape(color_hex)};\""
+
+            row_class = "cue"
+            row_style = ""
+            if tint_hex:
+                # Tint every cell of the row, not just <tr> background, so
+                # QTextDocument's HTML renderer actually applies it.
+                row_style = f" style=\"background:{html.escape(tint_hex)};\""
 
             rows.append(
-                "<tr>"
+                f"<tr class='{row_class}'{row_style}>"
                 f"<td class='tc'{tc_style}>{html.escape(cue.timecode or '')}</td>"
                 f"<td class='cue-name'>{html.escape(cue.name or '')}</td>"
                 f"<td class='cue-desc'>{html.escape(cue.description or '')}</td>"
@@ -779,10 +786,14 @@ class MainWindow(QMainWindow):
                 "<tr><td colspan='4' class='empty'>No cues in show.</td></tr>"
             )
 
-        # Notes:
-        # - Body margin = 0; printer.setPageMargins() handles paper margins.
-        # - QTextDocument supports a subset of CSS — keep selectors simple.
-        # - Repeat <thead> on every page (Qt honours this for table prints).
+        # Logo: referenced as a Qt resource named "logo" — _export_pdf
+        # registers the actual QImage on the QTextDocument before printing.
+        logo_html = ""
+        if self._show_settings.logo_path and os.path.exists(self._show_settings.logo_path):
+            logo_html = "<img src='logo' class='logo' />"
+
+        # Landscape A4 — printer.setPageOrientation handles paper size.
+        # Body margin = 0; printer.setPageMargins() handles paper margins.
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -790,111 +801,146 @@ class MainWindow(QMainWindow):
 <style>
 body {{
     font-family: Helvetica, Arial, sans-serif;
-    color: #111;
-    font-size: 10.5pt;
+    color: #1a1a1a;
+    font-size: 11pt;
     margin: 0;
     padding: 0;
 }}
+.header {{
+    border-bottom: 2pt solid #1f2233;
+    padding-bottom: 12pt;
+    margin-bottom: 16pt;
+}}
+.header-row {{
+    width: 100%;
+    border-collapse: collapse;
+}}
+.header-row td {{
+    vertical-align: middle;
+    padding: 0;
+    border: 0;
+}}
+.logo {{
+    height: 56pt;
+}}
+.title-cell {{
+    padding-left: 14pt;
+}}
 h1 {{
-    font-size: 22pt;
-    margin: 0 0 4pt 0;
+    font-size: 26pt;
+    margin: 0;
     font-weight: 700;
-    letter-spacing: -0.3pt;
+    letter-spacing: -0.5pt;
+    color: #0a0a0a;
 }}
-.meta {{
-    color: #666;
+.subtitle {{
+    color: #6a6a6a;
+    font-size: 10pt;
+    margin-top: 2pt;
+    letter-spacing: 0.4pt;
+}}
+.meta-cell {{
+    text-align: right;
+    color: #555;
     font-size: 9pt;
-    margin-bottom: 14pt;
-    border-bottom: 1px solid #d8dadf;
-    padding-bottom: 10pt;
+    line-height: 1.5;
 }}
-table {{
+table.cues {{
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
 }}
-th {{
-    background: #f4f5f7;
-    color: #555;
-    font-size: 8.5pt;
+table.cues th {{
+    background: #20232f;
+    color: #f0f1f5;
+    font-size: 9pt;
     text-transform: uppercase;
-    letter-spacing: 0.8pt;
+    letter-spacing: 1.2pt;
     text-align: left;
-    padding: 6pt 8pt;
-    border-bottom: 1.5pt solid #c0c3cc;
+    padding: 9pt 10pt;
+    border: 0;
 }}
-td {{
-    padding: 8pt 8pt;
+table.cues td {{
+    padding: 11pt 10pt;
     text-align: left;
     vertical-align: top;
     word-wrap: break-word;
-    border-bottom: 1px solid #ebecf0;
+    border-bottom: 1px solid #d8dce5;
+    line-height: 1.45;
 }}
-tr {{
+tr.cue {{
     page-break-inside: avoid;
 }}
 .tc {{
     white-space: nowrap;
     font-family: Menlo, Courier, monospace;
-    font-weight: 600;
-    font-size: 10pt;
-    color: #1a1a1a;
+    font-weight: 700;
+    font-size: 11pt;
+    color: #0a0a0a;
 }}
 .cue-name {{
-    font-weight: 600;
-    color: #1a1a1a;
+    font-weight: 700;
+    color: #0a0a0a;
+    font-size: 11.5pt;
 }}
 .cue-desc {{
-    color: #444;
+    color: #3a3a3a;
 }}
 .cue-notes {{
-    color: #222;
+    color: #1a1a1a;
 }}
 .section td {{
     background: #1f2233;
     color: #ffffff;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1pt;
-    padding: 8pt 10pt;
+    letter-spacing: 1.4pt;
+    padding: 10pt 14pt;
     border: 0;
+    font-size: 10pt;
     page-break-after: avoid;
 }}
 .note {{
-    margin: 0 0 4pt 0;
-    line-height: 1.35;
+    margin: 0 0 6pt 0;
 }}
 .note:last-child {{ margin-bottom: 0; }}
 .note-name {{
     font-weight: 700;
-    color: #5a4eaa;
+    color: #4d3fa0;
     font-size: 9pt;
-    letter-spacing: 0.3pt;
+    text-transform: uppercase;
+    letter-spacing: 0.6pt;
 }}
 .muted {{ color: #999; }}
 .empty {{
-    color: #666;
+    color: #777;
     text-align: center;
-    padding: 24pt;
+    padding: 36pt;
     font-style: italic;
 }}
 </style>
 </head>
 <body>
+<div class="header">
+<table class="header-row"><tr>
+<td style="width:80pt;">{logo_html}</td>
+<td class="title-cell">
 <h1>{html.escape(show_name)}</h1>
-<div class="meta">
-{cue_count} cue{'s' if cue_count != 1 else ''} ·
-{len(operator_names)} operator{'s' if len(operator_names) != 1 else ''} ·
-Generated {html.escape(generated_at)} ·
+<div class="subtitle">CUE SHEET · {cue_count} cue{'s' if cue_count != 1 else ''} · {len(operator_names)} operator{'s' if len(operator_names) != 1 else ''}</div>
+</td>
+<td class="meta-cell">
+Generated {html.escape(generated_at)}<br>
 {html.escape(APP_NAME)} {html.escape(VERSION)}
+</td>
+</tr></table>
 </div>
-<table>
+<table class="cues">
 <thead>
 <tr>
-<th style="width: 16%;">Timecode</th>
-<th style="width: 22%;">Cue</th>
+<th style="width: 12%;">Timecode</th>
+<th style="width: 20%;">Cue</th>
 <th style="width: 28%;">Description</th>
-<th style="width: 34%;">Operator Notes</th>
+<th style="width: 40%;">Operator Notes</th>
 </tr>
 </thead>
 <tbody>
@@ -914,22 +960,35 @@ Generated {html.escape(generated_at)} ·
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
 
+        from PyQt6.QtCore import QMarginsF, QUrl
+        from PyQt6.QtGui import QImage, QPageLayout
+
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(path)
-        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-        # Explicit, modest page margins — the body has margin: 0 so paper
-        # margins live entirely on the printer side. Without this the body
-        # margin and Qt's default ~30 mm page margin stacked, leaving the
-        # content cramped in the centre of the page.
-        from PyQt6.QtCore import QMarginsF
-        from PyQt6.QtGui import QPageLayout
-        printer.setPageMargins(
-            QMarginsF(15.0, 15.0, 15.0, 15.0),
-            QPageLayout.Unit.Millimeter,
-        )
+        # Landscape A4 — gives a wide row to fit timecode, name, description
+        # and operator notes side-by-side without cramping the description.
+        page_layout = printer.pageLayout()
+        page_layout.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        page_layout.setOrientation(QPageLayout.Orientation.Landscape)
+        page_layout.setMargins(QMarginsF(14.0, 12.0, 14.0, 12.0))
+        page_layout.setUnits(QPageLayout.Unit.Millimeter)
+        printer.setPageLayout(page_layout)
 
         doc = QTextDocument()
+        # Register the studio logo (if any) as a Qt resource the HTML can
+        # reference via <img src='logo'>. QImage handles the actual bytes;
+        # the HTML stays generic so we don't have to base64-encode in the
+        # template.
+        logo_path = self._show_settings.logo_path or ""
+        if logo_path and os.path.exists(logo_path):
+            img = QImage(logo_path)
+            if not img.isNull():
+                doc.addResource(
+                    QTextDocument.ResourceType.ImageResource,
+                    QUrl("logo"),
+                    img,
+                )
         doc.setHtml(self._build_pdf_html())
         try:
             doc.print(printer)
@@ -1620,3 +1679,23 @@ def _pdf_color_hex(name: str) -> str:
         "grey": "#6e6e6e",
     }
     return mapping.get(name.lower().strip(), "#9a9a9a")
+
+
+def _pdf_color_tint(name: str) -> str:
+    """Very light pastel of the cue colour for full-row backgrounds.
+    Rendered against white paper, so we blend each colour ~92% with white
+    — strong enough to scan, soft enough not to dominate."""
+    hex_color = _pdf_color_hex(name)
+    if not hex_color.startswith("#") or len(hex_color) != 7:
+        return ""
+    try:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+    except ValueError:
+        return ""
+    blend = 0.08  # 8% colour, 92% white
+    r = int(r * blend + 255 * (1 - blend))
+    g = int(g * blend + 255 * (1 - blend))
+    b = int(b * blend + 255 * (1 - blend))
+    return f"#{r:02x}{g:02x}{b:02x}"

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QPixmap, QColor
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 
 from show_file import ShowSettings
 from ui.fonts import mono_font, sans_font
@@ -444,8 +444,14 @@ class PerformanceView(QWidget):
             elif getattr(cue, "color", ""):
                 cue_color = _named_color(getattr(cue, "color", ""))
                 if cue_color is not None:
-                    item.setBackground(cue_color.darker(260))
-                    item.setForeground(QColor("#f0f0f0"))
+                    # Background: dark version of the cue colour, still
+                    # recognisable. darker(260) used to render almost black.
+                    bg = cue_color.darker(170)
+                    item.setBackground(bg)
+                    item.setForeground(QColor("#ffffff"))
+                    # Plus a saturated swatch icon on the left so the colour
+                    # reads even when the operator skims the list quickly.
+                    item.setIcon(_swatch_icon(cue_color))
             self._cue_list_widget.addItem(item)
         self._refresh_cue_overlay_selection()
 
@@ -614,3 +620,15 @@ class _OperatorCard(QWidget):
 def _named_color(name: str) -> Optional[QColor]:
     value = _CUE_COLORS.get(name.lower().strip())
     return QColor(value) if value else None
+
+
+def _swatch_icon(color: QColor, size: int = 14) -> QIcon:
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QBrush(color))
+    p.setPen(QPen(QColor(0, 0, 0, 80), 1))
+    p.drawRoundedRect(1, 1, size - 2, size - 2, 3, 3)
+    p.end()
+    return QIcon(pm)
