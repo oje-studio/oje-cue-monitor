@@ -168,14 +168,18 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        # Operator filter resolves from `?op=Name` first (so phone users can
-        # bookmark e.g. http://.../?op=Lighting and skip the picker), then
-        # the cookie set by the desktop /auth flow, then empty.
-        op_query = request.query.get("op", "")
-        op_cookie = request.cookies.get(OP_COOKIE, "")
-        operator = (op_query or op_cookie).strip()
+        # Operator filter is opt-in per request:
+        #   - `?op=Name` in URL → bookmark with that operator pinned, no
+        #     picker on load
+        #   - otherwise → empty filter, JS shows the operator picker so
+        #     the user explicitly chooses on every fresh page load
+        # The OP_COOKIE set by the password /auth flow is intentionally
+        # NOT read here — that would silently persist the previous
+        # operator across reloads, which the operator finds surprising.
+        op_query = request.query.get("op", "").strip()
+        operator = op_query if op_query in self._operator_names else ""
         html = _render_page(
-            operator if operator in self._operator_names else "",
+            operator,
             self._operator_names,
             self.base_url,
             authenticated=self._is_authenticated(request),
@@ -926,10 +930,14 @@ async function submitAuth() {{
 
     // No-password fast path: there's nothing to authenticate against, so
     // skip the /auth roundtrip entirely. Apply the operator filter
-    // client-side and hide the overlay.
+    // client-side, hide the overlay, and open the WS if we haven't
+    // already (initAuth defers connect when the picker is shown).
     if (!PASSWORD_REQUIRED) {{
         currentOperator = operator || null;
         overlay.classList.add('hidden');
+        if (!ws || ws.readyState >= WebSocket.CLOSING) {{
+            connect();
+        }}
         return;
     }}
 
@@ -1014,6 +1022,19 @@ function initAuth() {{
             operatorSelect.focus();
         }}
         return false;
+    }}
+
+    // Authenticated path:
+    //  - If the URL pinned an operator (?op=Name), skip the picker —
+    //    the user bookmarked the page for that operator on purpose.
+    //  - Otherwise, show the operator picker on every fresh page load
+    //    (incl. reload) so the user explicitly chooses each time. This
+    //    makes "who am I right now?" an active decision, not a silent
+    //    cookie-restore.
+    if (!OPERATOR_FILTER) {{
+        overlay.classList.remove('hidden');
+        operatorSelect.focus();
+        return false;     // wait for ENTER REMOTE → submitAuth → connect()
     }}
     overlay.classList.add('hidden');
     return true;
