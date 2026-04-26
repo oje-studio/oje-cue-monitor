@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
 
         footer = QWidget()
         footer.setFixedHeight(56)
-        footer.setStyleSheet(f"background: {NEAR_BLACK.name()};")
+        footer.setStyleSheet(f"background: {theme.BG_HEADER};")
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(12, 0, 12, 0)
         fl.setSpacing(8)
@@ -394,22 +394,18 @@ class MainWindow(QMainWindow):
         self._btn_help = QPushButton("?")
         self._btn_help.setFixedSize(28, 28)
         self._btn_help.setToolTip("Help & Keyboard Shortcuts  [F1]")
-        self._btn_help.setStyleSheet(
-            "QPushButton { background: transparent; color: #707070;"
-            "  border: 1px solid #2d2d2d; border-radius: 14px;"
-            "  font-weight: bold; font-size: 13px; }"
-            "QPushButton:hover { color: #d8d8d8; border-color: #4a4a4a; }"
-        )
+        self._btn_help.setStyleSheet(_help_btn_style())
         self._btn_help.clicked.connect(self._show_help)
         fl.addWidget(self._btn_help)
 
         # Show prep lives on the left — the operator does this before
         # the show starts and may dip back in mid-show to tweak notes.
         self._btn_edit = QPushButton(" Edit Cues")
-        self._btn_edit.setIcon(make_icon("edit", "#dadada"))
+        self._btn_edit.setIcon(make_icon("edit", theme.TEXT_PRIMARY))
         self._btn_edit.setIconSize(icon_size(16))
         self._btn_edit.setFixedHeight(34)
         self._btn_edit.setCheckable(True)
+        self._btn_edit.setStyleSheet(_secondary_btn_style())
         self._btn_edit.clicked.connect(self._toggle_edit_mode)
         fl.addWidget(self._btn_edit)
 
@@ -417,7 +413,7 @@ class MainWindow(QMainWindow):
         # Studio copyright in the middle, tiny + dim — recognised but
         # not competing for attention.
         cr_lbl = QLabel(f"{COPYRIGHT}  ·  {WEBSITE}")
-        cr_lbl.setStyleSheet(f"color: {QColor(70,70,70).name()}; font-size: 10px;")
+        cr_lbl.setStyleSheet(f"color: {theme.TEXT_DISABLED}; font-size: 10px;")
         fl.addWidget(cr_lbl)
         fl.addStretch()
 
@@ -427,24 +423,26 @@ class MainWindow(QMainWindow):
         #   Performance — bring the operator screen up
         #   START    — arm LTC and run the show
         self._btn_remote = QPushButton(" Remote")
-        self._btn_remote.setIcon(make_icon("remote", "#dadada"))
+        self._btn_remote.setIcon(make_icon("remote", theme.TEXT_PRIMARY))
         self._btn_remote.setIconSize(icon_size(16))
         self._btn_remote.setFixedHeight(34)
         self._btn_remote.setToolTip("Start/stop web remote for other devices")
         self._btn_remote.setCheckable(True)
+        self._btn_remote.setStyleSheet(_secondary_btn_style())
         self._btn_remote.clicked.connect(self._toggle_remote)
         fl.addWidget(self._btn_remote)
 
         self._btn_perf = QPushButton(" Performance")
-        self._btn_perf.setIcon(make_icon("fullscreen", "#dadada"))
+        self._btn_perf.setIcon(make_icon("fullscreen", theme.TEXT_PRIMARY))
         self._btn_perf.setIconSize(icon_size(16))
         self._btn_perf.setFixedHeight(34)
-        self._btn_perf.setStyleSheet(_perf_btn_style())
+        self._btn_perf.setStyleSheet(_secondary_btn_style())
         self._btn_perf.clicked.connect(self._enter_perf_mode)
         fl.addWidget(self._btn_perf)
 
         # START is THE primary action — visually distinct (taller, wider,
-        # accent-coloured icon) so the eye lands on it first.
+        # full green) so the eye lands on it first.  Switches to red
+        # in stop_btn_style while LTC is decoding.
         self._btn_start = QPushButton(" START")
         self._btn_start.setIcon(make_icon("record", "#ffffff"))
         self._btn_start.setIconSize(icon_size(18))
@@ -1915,26 +1913,58 @@ def _vline() -> QFrame:
 
 
 def _start_btn_style() -> str:
+    """Primary action — show is armed, ready to GO."""
     return (
-        f"QPushButton {{ background: {QColor(48,125,75).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {QColor(58,152,92).name()}; }}"
+        f"QPushButton {{ background: {theme.ACTION_PRIMARY}; "
+        f"color: white; font-weight: 700; letter-spacing: 1px; "
+        f"border: none; border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 14px; }}"
+        f"QPushButton:hover {{ background: {theme.ACTION_PRIMARY_HOVER}; }}"
     )
 
 
 def _stop_btn_style() -> str:
+    """START in its 'running' state — pressing again stops the show."""
     return (
-        f"QPushButton {{ background: {QColor(155,48,48).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {ACCENT_RED.name()}; }}"
+        f"QPushButton {{ background: {theme.SEMANTIC_DANGER}; "
+        f"color: white; font-weight: 700; letter-spacing: 1px; "
+        f"border: none; border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 14px; }}"
+        f"QPushButton:hover {{ background: #ED5A5F; }}"
     )
 
 
-def _perf_btn_style() -> str:
+def _secondary_btn_style() -> str:
+    """
+    Edit Cues / Remote / Performance — quieter than START so the
+    eye lands on the primary action first.  Uses BG_RAISED so the
+    button still reads as a control on the very dark footer, and
+    flips to an info-blue accent when checkable buttons are toggled
+    on (Remote streaming / Edit Mode active).
+    """
     return (
-        f"QPushButton {{ background: {QColor(48,75,135).name()}; "
-        f"color: white; font-weight: bold; border-radius: 4px; }}"
-        f"QPushButton:hover {{ background: {QColor(58,92,165).name()}; }}"
+        f"QPushButton {{ background: {theme.BG_RAISED}; "
+        f"color: {theme.TEXT_PRIMARY}; font-weight: 600; "
+        f"border: 1px solid {theme.BORDER}; "
+        f"border-radius: {theme.RADIUS_MD}px; "
+        f"padding: 0 12px; }}"
+        f"QPushButton:hover {{ background: #2e2e2e; "
+        f"border-color: {theme.BORDER_STRONG}; }}"
+        f"QPushButton:checked {{ background: rgba(122, 183, 255, 0.14); "
+        f"color: {theme.SEMANTIC_INFO}; "
+        f"border-color: {theme.SEMANTIC_INFO}; }}"
+        f"QPushButton:checked:hover {{ background: rgba(122, 183, 255, 0.22); }}"
+    )
+
+
+def _help_btn_style() -> str:
+    """Tiny pill on the very left of the footer — quiet by default."""
+    return (
+        f"QPushButton {{ background: transparent; color: {theme.TEXT_DIM}; "
+        f"border: 1px solid {theme.BORDER}; "
+        f"border-radius: 14px; font-weight: bold; font-size: 13px; }}"
+        f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; "
+        f"border-color: {theme.BORDER_STRONG}; }}"
     )
 
 
