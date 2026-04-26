@@ -322,14 +322,14 @@ class MainWindow(QMainWindow):
 
         # Transport controls live in the header top-right so they sit
         # where the operator's eyes already are when reading timecode.
-        self._btn_perf = QPushButton("PERFORMANCE")
+        self._btn_perf = QPushButton("⛶  PERFORMANCE")
         self._btn_perf.setFixedHeight(30)
         self._btn_perf.setFixedWidth(130)
         self._btn_perf.setStyleSheet(_perf_btn_style())
         self._btn_perf.clicked.connect(self._enter_perf_mode)
         hl.addWidget(self._btn_perf)
 
-        self._btn_start = QPushButton("START")
+        self._btn_start = QPushButton("●  START")
         self._btn_start.setFixedHeight(30)
         self._btn_start.setFixedWidth(72)
         self._btn_start.setStyleSheet(_start_btn_style())
@@ -397,13 +397,13 @@ class MainWindow(QMainWindow):
         # _build_menu_bar). The footer keeps only the two actions the
         # operator toggles during a show — everything else is one-shot
         # and belongs in the menu.
-        self._btn_edit = QPushButton("Edit Cues")
+        self._btn_edit = QPushButton("✎  Edit Cues")
         self._btn_edit.setFixedHeight(30)
         self._btn_edit.setCheckable(True)
         self._btn_edit.clicked.connect(self._toggle_edit_mode)
         fl.addWidget(self._btn_edit)
 
-        self._btn_remote = QPushButton("Remote")
+        self._btn_remote = QPushButton("⌘  Remote")
         self._btn_remote.setFixedHeight(30)
         self._btn_remote.setToolTip("Start/stop web remote for other devices")
         self._btn_remote.setCheckable(True)
@@ -1113,7 +1113,7 @@ Generated {html.escape(generated_at)}<br>
         self._web_remote.set_operators(self._show_settings.operator_names)
         self._web_remote.set_remote_password(self._show_settings.remote_password)
         self._web_remote.start()
-        self._btn_remote.setText("Remote ON")
+        self._btn_remote.setText("⌘  Remote ON")
         self._btn_remote.setStyleSheet(
             f"QPushButton {{ background: {QColor(48,100,160).name()}; "
             f"color: white; border-radius: 4px; }}"
@@ -1125,7 +1125,7 @@ Generated {html.escape(generated_at)}<br>
         if self._web_remote:
             self._web_remote.stop()
             self._web_remote = None
-        self._btn_remote.setText("Remote")
+        self._btn_remote.setText("⌘  Remote")
         self._btn_remote.setStyleSheet("")
         logger.info("Web remote stopped")
 
@@ -1153,7 +1153,7 @@ Generated {html.escape(generated_at)}<br>
         self._table.set_edit_mode(checked)
         self._edit_toolbar.setVisible(checked)
         if checked:
-            self._btn_edit.setText("Done")
+            self._btn_edit.setText("✓  Done")
             self._btn_edit.setStyleSheet(
                 f"QPushButton {{ background: {QColor(52,120,52).name()}; "
                 f"color: white; border-radius: 4px; }}"
@@ -1175,7 +1175,7 @@ Generated {html.escape(generated_at)}<br>
                 if not cue.is_divider:
                     self._op_panel.show_for_cue(row, cue)
         else:
-            self._btn_edit.setText("Edit Cues")
+            self._btn_edit.setText("✎  Edit Cues")
             self._btn_edit.setStyleSheet("")
             self._op_panel.hide_panel()
             self._table_splitter.setSizes([1280, 0])
@@ -1292,7 +1292,7 @@ Generated {html.escape(generated_at)}<br>
 
         self._running = True
         self._poll_timer.start()
-        self._btn_start.setText("STOP")
+        self._btn_start.setText("◼  STOP")
         self._btn_start.setStyleSheet(_stop_btn_style())
         self._live_label.setVisible(True)
 
@@ -1303,7 +1303,7 @@ Generated {html.escape(generated_at)}<br>
         self._running = False
         self._poll_timer.stop()
         self._blink_timer.stop()
-        self._btn_start.setText("START")
+        self._btn_start.setText("●  START")
         self._btn_start.setStyleSheet(_start_btn_style())
         self._live_label.setVisible(False)
         self._signal_ok = False
