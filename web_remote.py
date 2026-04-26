@@ -612,23 +612,11 @@ body {{
     padding: 4px 10px;
     font-size: 11px;
 }}
-/* Floating Access pill — sits in the top-right corner over the status
-   bar without occupying flex space, so the status bar stays a single
-   tight row on phones. */
-.access-pill {{
-    position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 8px);
-    right: calc(env(safe-area-inset-right, 0px) + 12px);
-    border: 1px solid #2d2d2d;
-    border-radius: 999px;
-    background: rgba(20, 20, 20, 0.9);
-    color: #b5b5b5;
-    padding: 4px 12px;
-    font-size: 11px;
-    z-index: 50;
-    cursor: pointer;
-}}
-.access-pill:hover {{ background: rgba(35, 35, 35, 0.95); }}
+/* Access button removed — switching operator is done via reload
+   (no-password mode shows the picker every reload; password mode
+   re-prompts the form). The .hidden helper still suppresses any
+   stray buttons that carry the legacy class. */
+.access-pill {{ display: none; }}
 .connection-lost {{
     position: fixed;
     top: env(safe-area-inset-top, 0px); left: 0; right: 0;
@@ -658,11 +646,6 @@ body {{
     .statusbar .clock {{ min-width: 0; }}
     .vu {{ height: 14px; gap: 1px; }}
     .vu .bar {{ width: 7px; }}
-    /* Hide Access on phones — it overlapped the clock on the right.
-       Operators on phone can lock to a specific operator via the URL
-       parameter (e.g. http://192.168.0.x:8080/?op=Lighting), so the
-       picker UI isn't strictly needed in this view. */
-    .access-pill {{ display: none; }}
     .main {{
         padding: 16px;
         gap: 8px;
@@ -723,9 +706,8 @@ body {{
     <span class="sep">|</span>
     <span class="clock" id="clock">--:--:--</span>
 </div>
-<!-- Access button floats over the status bar so it doesn't push the bar
-     into a two-row layout on narrow screens. -->
-<button id="access-btn" class="access-pill" type="button">Access</button>
+<!-- (Access button removed — the operator switches identity by reloading
+     the page; see initAuth handling.) -->
 
 <!-- Current cue — owns the flexible row. -->
 <div class="main">
@@ -1091,16 +1073,7 @@ function initAuth() {{
         }}
     }});
 
-    document.getElementById('access-btn').addEventListener('click', () => {{
-        document.getElementById('auth-error').textContent = '';
-        overlay.classList.remove('hidden');
-        if (!PASSWORD_REQUIRED) {{
-            passwordInput.value = '';
-            operatorSelect.focus();
-        }} else {{
-            passwordInput.focus();
-        }}
-    }});
+    // (Access button removed — operator switches by reloading.)
 
     operatorSelect.addEventListener('change', () => {{
         document.getElementById('auth-error').textContent = '';
