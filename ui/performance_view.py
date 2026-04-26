@@ -758,12 +758,14 @@ class _OperatorCard(QWidget):
         self._comment_lbl.setStyleSheet("color: #e6c840; background: transparent;")
         lay.addWidget(self._comment_lbl)
 
-        # Cap the comment area at ~4 lines of base-size text. If the
-        # operator types more than that, the label shrinks its own
-        # font down to fit instead of growing the row.
+        # Cap the comment area at ~10 lines of base-size text. 4 was too
+        # aggressive — even short content like a 6-bullet list got
+        # shrunk down to 12 pt because it didn't fit in 4 lines. With
+        # 10 the operator can write a typical multi-line note at full
+        # size; only genuinely huge text shrinks itself to fit.
         from PyQt6.QtGui import QFontMetrics
         line_h = QFontMetrics(f_comment).lineSpacing()
-        self._comment_lbl.set_max_height(line_h * 4)
+        self._comment_lbl.set_max_height(line_h * 10)
 
         lay.addStretch()
 
