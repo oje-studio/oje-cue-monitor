@@ -6,6 +6,7 @@ import logging
 import os
 import platform
 import queue
+import sys
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer, QSettings
@@ -1567,9 +1568,22 @@ def _logo_pixmap(color_hex: str, size: int) -> QPixmap:
     keeps the glyph silhouette and replaces its colour — the studio
     Ø is orange in the source file but lives on a dark header here,
     so it has to retint at runtime.
+
+    Path resolution handles both modes:
+      * dev / `python3 main.py` from a checkout: the file lives at
+        ``<repo>/assets/logo_src.png`` next to the source tree.
+      * PyInstaller frozen bundle (.app / .exe): the spec bundles
+        ``assets/logo_src.png`` into ``sys._MEIPASS/assets/...``;
+        ``sys.frozen`` flips True at runtime so we know to look
+        there instead of relative to ``__file__`` (which points
+        inside the bootloader's temp tree).
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    src_path = os.path.join(os.path.dirname(here), "assets", "logo_src.png")
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    else:
+        # ui/main_window.py → ui/ → repo root.
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src_path = os.path.join(base, "assets", "logo_src.png")
     src = QPixmap(src_path)
     if src.isNull():
         return QPixmap()
