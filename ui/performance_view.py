@@ -659,12 +659,79 @@ class PerformanceView(QWidget):
 
 # ── Operator card widget ──────────────────────────────────────────────────────
 
+class _AutoShrinkLabel(QLabel):
+    """
+    QLabel that drops its own font size until word-wrapped text fits
+    inside a fixed maximum height. Used for operator comments in
+    Performance Mode so a long note shrinks ITSELF instead of growing
+    the operator row and pushing the Next Cue strip off-screen.
+
+    Each label shrinks independently — operators with short notes
+    keep the base font size; only the verbose operator pays the cost.
+    """
+
+    def __init__(self, base_pt: int, min_pt: int = 11, parent=None):
+        super().__init__(parent)
+        self._base_pt = base_pt
+        self._min_pt = min_pt
+        self._max_h = 0
+        self.setWordWrap(True)
+
+    def set_base_pt(self, pt: int):
+        self._base_pt = pt
+        self._fit()
+
+    def set_max_height(self, h: int):
+        self._max_h = h
+        self.setMaximumHeight(h if h > 0 else 16777215)
+        self._fit()
+
+    def setText(self, text: str):  # type: ignore[override]
+        super().setText(text)
+        self._fit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self):
+        from PyQt6.QtGui import QFontMetrics
+        text = self.text()
+        w = self.width()
+        if not text or w <= 0 or self._max_h <= 0:
+            self._apply_pt(self._base_pt)
+            return
+        # Walk from base size down to min, stop at the largest that fits.
+        for pt in range(self._base_pt, self._min_pt - 1, -1):
+            f = self.font()
+            f.setPointSize(pt)
+            metrics = QFontMetrics(f)
+            rect = metrics.boundingRect(
+                0, 0, w, 99999,
+                int(Qt.TextFlag.TextWordWrap),
+                text,
+            )
+            if rect.height() <= self._max_h:
+                self._apply_pt(pt)
+                return
+        # Couldn't fit even at min — settle at min and let the label
+        # clip rather than overflow the row.
+        self._apply_pt(self._min_pt)
+
+    def _apply_pt(self, pt: int):
+        f = self.font()
+        if f.pointSize() != pt:
+            f.setPointSize(pt)
+            self.setFont(f)
+
+
 class _OperatorCard(QWidget):
     """A single operator column card with name header + comment."""
 
     def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12, parent=None):
         super().__init__(parent)
         self.op_name = op_name
+        self._base_font_size = font_size
         self.setStyleSheet(
             "background: #111118; border-radius: 8px;"
         )
@@ -682,13 +749,21 @@ class _OperatorCard(QWidget):
         )
         lay.addWidget(self._name_lbl)
 
-        self._comment_lbl = QLabel("")
+        # Auto-shrinking comment label — see _AutoShrinkLabel for the
+        # fit logic. min_pt=11 keeps ridiculously long notes still legible.
+        self._comment_lbl = _AutoShrinkLabel(base_pt=font_size, min_pt=11)
         f_comment = QFont()
         f_comment.setPointSize(font_size)
         self._comment_lbl.setFont(f_comment)
         self._comment_lbl.setStyleSheet("color: #e6c840; background: transparent;")
-        self._comment_lbl.setWordWrap(True)
         lay.addWidget(self._comment_lbl)
+
+        # Cap the comment area at ~4 lines of base-size text. If the
+        # operator types more than that, the label shrinks its own
+        # font down to fit instead of growing the row.
+        from PyQt6.QtGui import QFontMetrics
+        line_h = QFontMetrics(f_comment).lineSpacing()
+        self._comment_lbl.set_max_height(line_h * 4)
 
         lay.addStretch()
 
