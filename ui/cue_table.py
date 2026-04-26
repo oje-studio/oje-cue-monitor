@@ -257,10 +257,19 @@ class CueTable(QTableWidget):
 
         self.setHorizontalHeaderLabels(COLUMNS)
         hh = self.horizontalHeader()
+        # Column sizing rationale:
+        #   #          fits to content (1-3 digits)
+        #   Timecode   fixed 120 px — always HH:MM:SS:FF, no wrap
+        #   Name       interactive ~220 px — readable but doesn't hog
+        #   Description STRETCH — takes whatever's left; this is the
+        #              column that gets squeezed when the operator panel
+        #              opens on the right, so Description gets priority
+        #   Color      fixed 90 px — swatch + label
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         hh.resizeSection(1, 120)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(2, 220)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         hh.resizeSection(4, 90)
@@ -274,6 +283,18 @@ class CueTable(QTableWidget):
 
         f = QFont(); f.setPointSize(12)
         self.setFont(f)
+        # Focus ring on the active cell — sub-treme blue outline so the
+        # operator can see where their next keystroke goes (Qt's default
+        # is no border at all on QTableWidget cells).
+        self.setStyleSheet(self.styleSheet() + """
+            QTableWidget::item:focus {
+                border: 1px solid #5a8ec0;
+                outline: none;
+            }
+            QTableWidget::item:selected {
+                background: #2c4a70;
+            }
+        """)
 
         self.setItemDelegateForColumn(1, TimecodeDelegate(self, self))
         self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
