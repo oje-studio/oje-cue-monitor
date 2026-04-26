@@ -168,16 +168,22 @@ class WebRemoteServer:
     # ── HTTP handlers ────────────────────────────────────────────────────────
 
     async def _handle_index(self, request):
-        # Operator filter is opt-in per request:
-        #   - `?op=Name` in URL → bookmark with that operator pinned, no
-        #     picker on load
-        #   - otherwise → empty filter, JS shows the operator picker so
-        #     the user explicitly chooses on every fresh page load
-        # The OP_COOKIE set by the password /auth flow is intentionally
-        # NOT read here — that would silently persist the previous
-        # operator across reloads, which the operator finds surprising.
-        op_query = request.query.get("op", "").strip()
-        operator = op_query if op_query in self._operator_names else ""
+        # How operator filter is resolved depends on whether a password
+        # is configured for the remote:
+        #   * Password mode: trust OP_COOKIE (set by the /auth flow on
+        #     successful login). The user has already paid the cost of
+        #     entering a password and picking an operator; honour that
+        #     across reloads. To switch operator they use Access on
+        #     desktop or log out.
+        #   * No-password mode: ignore the cookie. Every reload starts
+        #     with an empty filter, JS shows the picker, and the user
+        #     re-confirms who they are. This matches the operator's
+        #     expectation that a reload = a fresh "who am I" prompt.
+        if self._remote_password:
+            op = request.cookies.get(OP_COOKIE, "").strip()
+            operator = op if op in self._operator_names else ""
+        else:
+            operator = ""
         html = _render_page(
             operator,
             self._operator_names,
