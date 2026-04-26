@@ -1779,36 +1779,67 @@ class _PdfExportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Export PDF — Options")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(380)
+        # Dark surface + token-driven inputs / labels / checkboxes to
+        # match the Settings dialog (f2).  Form labels stay muted; the
+        # checkbox indicator uses info-blue when checked, same as
+        # everywhere else.
+        self.setStyleSheet(
+            f"QDialog {{ background: {theme.BG_APP}; }}"
+            f"QLabel {{ color: {theme.TEXT_MUTED}; "
+            "font-size: 11px; font-weight: 600; letter-spacing: 1px; }"
+            f"QCheckBox {{ color: {theme.TEXT_PRIMARY}; }}"
+            f"QCheckBox::indicator {{ width: 16px; height: 16px; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_SM}px; "
+            f"background: {theme.BG_INPUT}; }}"
+            f"QCheckBox::indicator:checked {{ "
+            f"background: {theme.SEMANTIC_INFO}; "
+            f"border-color: {theme.SEMANTIC_INFO}; }}"
+        )
 
         form = QFormLayout()
         form.setSpacing(10)
+        form.setHorizontalSpacing(14)
 
         self._cb_landscape = QCheckBox("Landscape (wider rows)")
         self._cb_landscape.setChecked(True)
-        form.addRow("Paper:", self._cb_landscape)
+        form.addRow("PAPER", self._cb_landscape)
 
         self._cb_notes = QCheckBox("Include operator notes column")
         self._cb_notes.setChecked(True)
-        form.addRow("Content:", self._cb_notes)
+        form.addRow("CONTENT", self._cb_notes)
 
         self._cb_page_break = QCheckBox("Start each section on a new page")
         self._cb_page_break.setChecked(False)
-        form.addRow("Layout:", self._cb_page_break)
+        form.addRow("LAYOUT", self._cb_page_break)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Export…")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        # Custom buttons so Export gets the primary green and Cancel
+        # the secondary style — QDialogButtonBox would inherit the
+        # native platform look and visually break from the rest of
+        # the app.
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet(_secondary_btn_style())
+        btn_cancel.setFixedHeight(32)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_export = QPushButton("Export…")
+        btn_export.setStyleSheet(_start_btn_style())
+        btn_export.setFixedHeight(32)
+        btn_export.setMinimumWidth(110)
+        btn_export.setDefault(True)
+        btn_export.clicked.connect(self.accept)
+        btn_row.addWidget(btn_export)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 14)
+        root.setContentsMargins(22, 20, 22, 16)
+        root.setSpacing(14)
         root.addLayout(form)
-        root.addSpacing(6)
-        root.addWidget(buttons)
+        root.addLayout(btn_row)
 
     @classmethod
     def ask(cls, parent) -> Optional[Dict]:
