@@ -17,14 +17,14 @@ No Python install required — just download, unzip (macOS) or run (Windows).
 
 - **LTC Timecode Decoding** — reads SMPTE/LTC timecode from any audio input via libltc
 - **Non-Linear Cue Triggering** — cues trigger by timecode hit in user-defined order, not sorted
-- **Cue List** — timed cues with names, descriptions, colors, section dividers
-- **Per-Operator Comments** — configurable operator list, each cue has individual notes per operator
-- **Performance Mode** — full-screen operator view with large fonts, countdown timer, operator columns
-- **Web Remote** — serve Performance View to any device on the local network via WebSocket
-- **Show File Format (.ojeshow)** — single JSON file with all settings + cue list
-- **Duplicate Timecode Detection** — visual warnings for conflicting cues
-- **Signal Monitoring** — VU meter, weak/clipping warnings, signal loss detection
-- **Dark UI** — designed for backstage/booth environments
+- **Cue List** — timed cues with names, descriptions, colours, section dividers with cue counts
+- **Per-Operator Comments** — configurable operator list with role-semantic colours (Lighting blue, Audio amber, Stage Manager purple, customisable per role) so each operator picks out their column at a glance
+- **Performance Mode** — full-screen operator view with large fonts, countdown timer, role-coloured operator columns, and a one-tap full-cue-list overlay
+- **Web Remote** — serve Performance View to any device on the local network via WebSocket; password-protected access; operator-specific filtering so each phone shows only the cues its operator owns
+- **Duplicate Timecode Detection** — amber row tint, left stripe, and "DUP" pill in the cue list; identical detection in the cue table and any future cue-list export
+- **Signal Monitoring** — five-bar VU meter, semantic LIVE / WEAK / CLIPPING / NO SIGNAL states, signal-loss blink
+- **Show File Format (.ojeshow)** — single JSON file with all settings + cue list, autosave on dirty, crash-recovery prompt on next launch
+- **Unified Dark Design System** — single token vocabulary across the desktop UI, the cue table, Performance Mode, and the web remote so colours mean the same thing everywhere they appear (green = active / locked, amber = warning / duplicate, red = stop / no signal)
 
 ## Keyboard Shortcuts
 
