@@ -31,9 +31,6 @@ C_SECTION_BG    = QColor(theme.SECTION_BG)
 C_SECTION_TEXT  = QColor(theme.SECTION_TEXT)
 C_SECTION_COUNT = QColor(theme.SECTION_COUNT_TEXT)
 C_TEXT_NORM  = QColor(220, 220, 220)
-C_TC_ERROR   = QColor(110, 35, 35)
-C_DUPLICATE  = QColor(140, 100, 20)
-C_DUP_HIGHLIGHT = QColor(160, 120, 30)
 
 # 20 color choices
 # A short, well-spaced palette is easier to scan than 20 near-duplicates.
@@ -237,25 +234,17 @@ class TimecodePopup(QFrame):
 # ── Timecode paint delegate (visual only, no editing) ─────────────────────────
 
 class TimecodeDelegate(QStyledItemDelegate):
+    """
+    Read-only paint for the timecode column.  The duplicate-row
+    indication used to live here as a small ⚠ glyph; it now lives
+    in DupBadgeDelegate on the NAME column (a clearer "DUP" pill,
+    co-located with the row's amber stripe and tint), so this
+    delegate is back to a plain paint.
+    """
+
     def __init__(self, table: "CueTable", parent=None):
         super().__init__(parent)
         self._table = table
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        row = index.row()
-        is_dup = row in self._table._duplicate_rows
-
-        super().paint(painter, option, index)
-
-        if is_dup:
-            painter.save()
-            painter.setPen(QColor(225, 180, 40))
-            f = QFont(); f.setPointSize(13)
-            painter.setFont(f)
-            x = option.rect.right() - 18
-            y = option.rect.center().y() + 5
-            painter.drawText(x, y, "⚠")
-            painter.restore()
 
     def createEditor(self, parent, option, index):
         return None
@@ -265,14 +254,18 @@ class TimecodeDelegate(QStyledItemDelegate):
 
 class ActiveRowDelegate(QStyledItemDelegate):
     """
-    Lays a 3-px green stripe down the left edge of the active cue's
-    row.  Installed only on column 0 (#) — a stripe at the left of the
+    Lays a 3-px coloured stripe down the left edge of certain rows.
+    Installed only on column 0 (#) — a stripe at the left of the
     leftmost cell reads as "the row's left border" because col 0
     butts up against the table's left edge.
 
-    The tint and bold come from _apply_styles_inner; this delegate
-    only adds the visible border, so a stale active state still looks
-    sensible if the painter runs first.
+    Priority: active (green) > duplicate (amber).  An active cue
+    that also happens to be a duplicate is still "live", so the
+    green wins.
+
+    The row tint, text colour, and bold come from
+    _apply_styles_inner; this delegate only adds the visible stripe,
+    so a stale state still looks sensible if the painter runs first.
     """
 
     STRIPE_WIDTH = 3
@@ -283,15 +276,68 @@ class ActiveRowDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
         super().paint(painter, option, index)
-        if index.row() == self._table._active_row:
+        row = index.row()
+        stripe = None
+        if row == self._table._active_row:
+            stripe = QColor(theme.SEMANTIC_SUCCESS)
+        elif row in self._table._duplicate_rows:
+            stripe = QColor(theme.SEMANTIC_WARNING)
+        if stripe is not None:
             painter.save()
-            painter.setBrush(QBrush(QColor(theme.SEMANTIC_SUCCESS)))
+            painter.setBrush(QBrush(stripe))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(
                 option.rect.x(), option.rect.y(),
                 self.STRIPE_WIDTH, option.rect.height(),
             )
             painter.restore()
+
+
+class DupBadgeDelegate(QStyledItemDelegate):
+    """
+    Paints a small amber "DUP" pill at the right edge of the NAME
+    column for duplicate-timecode rows.  Coexists with the cell's
+    own text + editor — the pill is purely visual feedback,
+    drawn on top after the default item paint.
+    """
+
+    def __init__(self, table: "CueTable", parent=None):
+        super().__init__(parent)
+        self._table = table
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        super().paint(painter, option, index)
+        if index.row() not in self._table._duplicate_rows:
+            return
+        # Don't paint the badge on dividers (which never carry a
+        # timecode and so can't be duplicates anyway, but be safe).
+        cue = self._table._cues[index.row()] if index.row() < len(self._table._cues) else None
+        if cue is None or cue.is_divider:
+            return
+
+        painter.save()
+        f = QFont(); f.setPointSize(9); f.setBold(True)
+        painter.setFont(f)
+        text = "DUP"
+        fm = painter.fontMetrics()
+        text_w = fm.horizontalAdvance(text)
+        pad_x = 6
+        pad_y = 2
+        pill_w = text_w + pad_x * 2
+        pill_h = fm.height() + pad_y * 2
+        x = option.rect.right() - pill_w - 6
+        y = option.rect.center().y() - pill_h // 2
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(theme.SEMANTIC_WARNING)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(x, y, pill_w, pill_h, pill_h / 2, pill_h / 2)
+        painter.setPen(QColor("#1a1300"))      # dark ink for AAA contrast on amber
+        painter.drawText(
+            QRect(x, y, pill_w, pill_h),
+            Qt.AlignmentFlag.AlignCenter,
+            text,
+        )
+        painter.restore()
 
 
 # ── CueTable ─────────────────────────────────────────────────────────────────
@@ -359,6 +405,7 @@ class CueTable(QTableWidget):
 
         self.setItemDelegateForColumn(0, ActiveRowDelegate(self, self))
         self.setItemDelegateForColumn(1, TimecodeDelegate(self, self))
+        self.setItemDelegateForColumn(2, DupBadgeDelegate(self, self))
         self.setItemDelegateForColumn(COL_COLOR, ColorDelegate(self))
         # Hidden by default — set_edit_mode(True) reveals it when
         # the operator enters edit mode.
@@ -616,13 +663,27 @@ class CueTable(QTableWidget):
                     )
                     item.setForeground(QBrush(QColor(theme.TEXT_BRIGHT)))
                     _bold(item, True)
-                elif is_dup_hl:
-                    item.setBackground(QBrush(C_DUP_HIGHLIGHT))
-                    item.setForeground(QBrush(C_TEXT_NORM))
-                    _bold(item, False)
-                elif is_dup and col == 1:
-                    item.setBackground(QBrush(C_DUPLICATE))
-                    item.setForeground(QBrush(C_TEXT_NORM))
+                elif is_dup_hl or is_dup:
+                    # Duplicate-timecode rows: a 14 % amber blend over
+                    # the row, matching the active-row blend strength
+                    # but in the warning hue.  Sibling-highlighted
+                    # rows (the operator clicked one duplicate to see
+                    # its peers) get a slightly stronger 18 % blend
+                    # plus brighter text so the selection emphasis
+                    # still stands out without introducing yet
+                    # another colour.  The full row tints — col 1 is
+                    # no longer special-cased.  The "DUP" pill is
+                    # painted by DupBadgeDelegate on col 2 and the
+                    # left stripe by ActiveRowDelegate on col 0.
+                    alpha = 0.18 if is_dup_hl else 0.14
+                    item.setBackground(
+                        QBrush(_color_blend(C_FUTURE_BG,
+                                            QColor(theme.SEMANTIC_WARNING),
+                                            alpha))
+                    )
+                    item.setForeground(
+                        QBrush(QColor(theme.TEXT_BRIGHT if is_dup_hl else theme.TEXT_PRIMARY))
+                    )
                     _bold(item, False)
                 elif is_past:
                     item.setBackground(QBrush(C_PAST_BG))
