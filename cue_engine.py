@@ -204,49 +204,51 @@ class CueEngine:
 
     def get_current_cue(self, tc_frames: int) -> Optional[Cue]:
         """
-        Non-linear cue triggering — cues are matched purely by timecode,
-        not by list order. The "current" cue is the one whose timecode is
-        most recently passed (largest frames value <= tc_frames). When two
-        cues share the same timecode, the later one in list order wins
-        (matches the duplicate-TC warning shown in the editor).
+        Strict second-match: a cue is "current" only while the playhead's
+        seconds-of-day equals one of the cues' seconds-of-day. Inside
+        that one-second window LTC ticks the frame counter but the cue
+        stays current; the moment the second changes, current becomes
+        None (UI shows "No cue at this timecode") until the next cue's
+        second is hit.
 
-        Once a cue has fired it stays "current" until the next one fires
-        (and after the last cue, indefinitely). A None result only means
-        "the playhead is before any cue" — we use that to show
-        "No cue at this timecode" in the UI.
+        When two cues share the same second, the later one in list order
+        wins — matches the duplicate-TC warning in the editor.
         """
         self._prev_frames = tc_frames
-        best_idx = -1
-        best_frames = -1
+        fps = self.fps or 25.0
+        ltc_second = int(tc_frames // fps)
+        match_idx = -1
         for i, cue in enumerate(self.cues):
             if cue.is_divider or not cue.has_timecode:
                 continue
-            if cue.frames <= tc_frames and cue.frames >= best_frames:
-                best_idx = i
-                best_frames = cue.frames
-        self._active_index = best_idx
-        if 0 <= best_idx < len(self.cues):
-            return self.cues[best_idx]
+            if int(cue.frames // fps) == ltc_second:
+                match_idx = i      # later occurrence in list overrides
+        self._active_index = match_idx
+        if 0 <= match_idx < len(self.cues):
+            return self.cues[match_idx]
         return None
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
         """
-        Next cue in *list order* — i.e. the show's running order, which is
-        what the operator actually maintains. Random access by timecode is
-        only for resolving the *current* cue; once that's pinned down,
-        "next" walks the list from there.
+        Soonest upcoming cue by timecode — the cue with the smallest
+        frames value strictly greater than the playhead. List order is
+        ignored: with strict second-match for "current", the next cue
+        needs to be picked by time, otherwise a cue whose TC is in the
+        past could appear as "next" just because it sits later in the
+        list.
 
-        Why list order, not time order:
-        if cues are 04:00 (row 1), then 03:00 (row 17, last), the operator
-        considers 03:00 the end of the show. After it plays, "next" should
-        be empty — not 04:00 again from the top.
+        Ties on the same TC break to the first one in list order.
         """
-        start = self._active_index + 1 if self._active_index >= 0 else 0
-        for i in range(start, len(self.cues)):
-            cue = self.cues[i]
+        best_idx = -1
+        best_frames = None
+        for i, cue in enumerate(self.cues):
             if cue.is_divider or not cue.has_timecode:
                 continue
-            return cue
+            if cue.frames > tc_frames and (best_frames is None or cue.frames < best_frames):
+                best_idx = i
+                best_frames = cue.frames
+        if 0 <= best_idx < len(self.cues):
+            return self.cues[best_idx]
         return None
 
     def get_countdown(self, tc_frames: int) -> Optional[float]:
