@@ -431,7 +431,7 @@ body {{
 .overlay {{
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.94);
+    background: #0a0a0a;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -783,11 +783,23 @@ async function submitAuth() {{
     const password = document.getElementById('password-input').value;
     const errorEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('auth-submit');
+    const overlay = document.getElementById('auth-overlay');
     // Guard against the form firing submit twice (e.g. Enter + click).
     if (submitBtn.disabled) return;
     errorEl.textContent = '';
-    submitBtn.disabled = true;
 
+    // No-password fast path: there's nothing to authenticate against, so
+    // skip the /auth roundtrip entirely. Apply the operator filter
+    // client-side and hide the overlay. No fetch, no reload, no scope
+    // for "the button doesn't do anything" — the user gets instant
+    // feedback the moment they tap.
+    if (!PASSWORD_REQUIRED) {{
+        currentOperator = operator || null;
+        overlay.classList.add('hidden');
+        return;
+    }}
+
+    submitBtn.disabled = true;
     try {{
         const resp = await fetch('/auth', {{
             method: 'POST',
@@ -802,8 +814,7 @@ async function submitAuth() {{
             return;
         }}
         currentOperator = operator || null;
-        // Defensive: window.location.reload(true) for older Safari which
-        // sometimes serves the cached unauthenticated page on plain reload.
+        // Reload so the server-rendered page picks up the new auth cookie.
         window.location.reload();
     }} catch (_err) {{
         errorEl.textContent = 'Could not reach the remote server.';
