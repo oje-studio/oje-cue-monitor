@@ -640,12 +640,13 @@ body {{
 .connection-lost {{
     position: fixed;
     top: env(safe-area-inset-top, 0px); left: 0; right: 0;
-    background: #a03030;
-    color: white;
+    background: var(--danger);
+    color: var(--text-bright);
     text-align: center;
-    padding: 6px;
+    padding: var(--space-3);
     font-size: 12px;
-    font-weight: bold;
+    font-weight: 600;
+    letter-spacing: 1px;
     z-index: 999;
 }}
 /* Phone-specific tweaks. The base layout is already mobile-first via
