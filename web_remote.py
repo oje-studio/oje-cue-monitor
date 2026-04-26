@@ -599,11 +599,11 @@ body {{
         </div>
         <div class="field" id="password-field">
             <label for="password-input">PASSWORD</label>
-            <input id="password-input" type="password" autocomplete="current-password" placeholder="{password_placeholder}">
+            <input id="password-input" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="{password_placeholder}">
         </div>
         <div id="auth-error" class="error"></div>
         <div class="actions">
-            <button id="auth-submit" class="primary-btn" type="button">ENTER REMOTE</button>
+            <button id="auth-submit" class="primary-btn" type="submit">ENTER REMOTE</button>
         </div>
     </form>
 </div>
@@ -777,6 +777,8 @@ async function submitAuth() {{
     const password = document.getElementById('password-input').value;
     const errorEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('auth-submit');
+    // Guard against the form firing submit twice (e.g. Enter + click).
+    if (submitBtn.disabled) return;
     errorEl.textContent = '';
     submitBtn.disabled = true;
 
@@ -787,13 +789,16 @@ async function submitAuth() {{
             body: JSON.stringify({{ operator, password }}),
             credentials: 'same-origin',
         }});
-        const data = await resp.json();
+        let data = {{}};
+        try {{ data = await resp.json(); }} catch (_e) {{}}
         if (!resp.ok || !data.ok) {{
             errorEl.textContent = data.error || 'Authentication failed.';
             return;
         }}
         currentOperator = operator || null;
-        location.reload();
+        // Defensive: window.location.reload(true) for older Safari which
+        // sometimes serves the cached unauthenticated page on plain reload.
+        window.location.reload();
     }} catch (_err) {{
         errorEl.textContent = 'Could not reach the remote server.';
     }} finally {{
@@ -807,16 +812,17 @@ function initAuth() {{
     const passwordInput = document.getElementById('password-input');
     const operatorSelect = document.getElementById('operator-select');
     const authForm = document.getElementById('auth-form');
-    const authSubmit = document.getElementById('auth-submit');
     document.getElementById('password-field').classList.toggle('hidden', !PASSWORD_REQUIRED);
+
+    // The button is type="submit", so a tap on it OR pressing Enter inside
+    // any field of the form triggers the form's native submit. We hijack
+    // that to call submitAuth, with preventDefault so the page doesn't
+    // reload to /?operator=…&password=…
     authForm.addEventListener('submit', (event) => {{
         event.preventDefault();
         submitAuth();
     }});
-    authSubmit.addEventListener('click', (event) => {{
-        event.preventDefault();
-        submitAuth();
-    }});
+
     document.getElementById('access-btn').addEventListener('click', () => {{
         document.getElementById('auth-error').textContent = '';
         overlay.classList.remove('hidden');
@@ -827,12 +833,7 @@ function initAuth() {{
             passwordInput.focus();
         }}
     }});
-    document.addEventListener('keydown', (event) => {{
-        if (!overlay.classList.contains('hidden') && event.key === 'Enter') {{
-            event.preventDefault();
-            submitAuth();
-        }}
-    }});
+
     operatorSelect.addEventListener('change', () => {{
         document.getElementById('auth-error').textContent = '';
     }});
