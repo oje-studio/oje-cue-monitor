@@ -818,9 +818,12 @@ class MainWindow(QMainWindow):
 
         cues = self._engine.cues
         dup_rows = find_duplicate_rows(cues)
-        section_count = sum(1 for c in cues if c.is_divider)
-        cue_count     = sum(1 for c in cues if not c.is_divider)
-        dup_count     = len(dup_rows)
+        # Section / cue / dup counts are stashed on the document
+        # itself so _paint_pdf_subheader (overlay) can read them
+        # without round-tripping through HTML or recomputing.
+        self._pdf_section_count = sum(1 for c in cues if c.is_divider)
+        self._pdf_cue_count     = sum(1 for c in cues if not c.is_divider)
+        self._pdf_dup_count     = len(dup_rows)
 
         n_cols = 4 if include_notes else 3
         # Spec column widths.  When notes are off, the freed 40 %
@@ -830,14 +833,6 @@ class MainWindow(QMainWindow):
             col_widths = ("14%", "16%", "30%", "40%")
         else:
             col_widths = ("16%", "22%", "62%")
-
-        # Subheader summary — duplicate count uses the warning amber
-        # only when there are any duplicates (else neutral dark grey
-        # like the other numbers).
-        dup_color = "#b45309" if dup_count else "#333"
-        dup_count_html = (
-            f"<span style=\"color:{dup_color}; font-weight:500;\">{dup_count}</span>"
-        )
 
         # Build table rows.
         body_rows: List[str] = []
@@ -966,32 +961,16 @@ class MainWindow(QMainWindow):
             f"<col style=\"width:{w};\">" for w in col_widths
         ) + "</colgroup>"
 
-        # Subheader counts strip — page numbers come in via the
-        # painter overlay (P5c).
-        subheader_html = (
-            "<table style=\"width:100%; background:#f5f2ed; "
-            "border-bottom: 0.5pt solid #e0d8cf; "
-            "border-collapse:collapse; margin-bottom:8pt;\"><tr>"
-            "<td style=\"padding:7pt 0; font-size:9.5pt; color:#888;\">"
-            f"Sections <span style=\"color:#333; font-weight:500;\">{section_count}</span>"
-            f" &nbsp;·&nbsp; Total cues <span style=\"color:#333; font-weight:500;\">{cue_count}</span>"
-            f" &nbsp;·&nbsp; Duplicate timecodes {dup_count_html}"
-            "</td>"
-            "</tr></table>"
-        )
-
-        # Header band — placeholder block at the top of the doc.
-        # P5c will paint the proper black header on top; for now
-        # the doc just leaves the space empty so a P4-only export
-        # still looks coherent.  Height matches the spec's header
-        # padding (~52pt = 14 + 36 logo + 14 - 12 for the existing
-        # margin-bottom).
+        # Header + subheader space at the top of the doc.  Both
+        # bands are painted on page 1 by _paint_pdf_header /
+        # _paint_pdf_subheader during the print loop; the doc
+        # itself just reserves the vertical real estate so the
+        # table starts below the painted region.  Pages 2+ don't
+        # see this placeholder at all (it lives once at the top
+        # of the body) so the table flows full-height there.
+        chrome_h_pt = _PDF_HEADER_H_PT + _PDF_SUBHEADER_H_PT
         header_placeholder = (
-            "<div style=\"height:52pt; background:#0d0d0d; "
-            "color:#ffffff; font-family:Helvetica,Arial,sans-serif; "
-            "padding:14pt 24pt; font-size:11pt;\">"
-            f"{html.escape(self._current_show_title())} — Master Cue List"
-            "</div>"
+            f"<div style=\"height:{chrome_h_pt}pt;\">&nbsp;</div>"
         )
 
         return f"""<!DOCTYPE html>
@@ -1071,7 +1050,6 @@ tr.section td {{
 </head>
 <body>
 {header_placeholder}
-{subheader_html}
 <table class="cues">
 {colgroup}
 <thead>
@@ -1182,6 +1160,17 @@ tr.section td {{
             copyright_text = (
                 f"© {datetime.now().year} ØJE Studio — Vienna · oje.studio"
             )
+            exported_date = datetime.now().strftime("%d %b %Y")
+            show_title_str = self._current_show_title()
+
+            # Logo pixmap (header overlay) — Qt does the resource
+            # loading from the same path the doc uses for <img>.
+            logo_pixmap = QPixmap(logo_path) if logo_path else None
+            if logo_pixmap is not None and logo_pixmap.isNull():
+                logo_pixmap = None
+
+            header_h_dp    = _PDF_HEADER_H_PT    * pt_to_dp
+            subheader_h_dp = _PDF_SUBHEADER_H_PT * pt_to_dp
 
             for i in range(page_count):
                 if i > 0:
@@ -1191,6 +1180,28 @@ tr.section td {{
                 painter.translate(0, -i * body_h_dp)
                 doc.drawContents(painter, full_doc_rect)
                 painter.restore()
+                # Page-1 chrome: header + subheader bands painted
+                # on top of the placeholder space the HTML reserved
+                # at the top of the doc.
+                if i == 0:
+                    painter.save()
+                    _paint_pdf_header(
+                        painter, page_w_dp, header_h_dp, pt_to_dp,
+                        show_title=show_title_str,
+                        exported_date=exported_date,
+                        logo_pixmap=logo_pixmap,
+                    )
+                    painter.restore()
+                    painter.save()
+                    painter.translate(0, header_h_dp)
+                    _paint_pdf_subheader(
+                        painter, page_w_dp, subheader_h_dp, pt_to_dp,
+                        section_count=self._pdf_section_count,
+                        cue_count=self._pdf_cue_count,
+                        dup_count=self._pdf_dup_count,
+                        total_pages=page_count,
+                    )
+                    painter.restore()
                 # Footer overlay (every page)
                 painter.save()
                 painter.translate(0, body_h_dp)
@@ -2218,10 +2229,229 @@ def _help_btn_style() -> str:
     )
 
 
-# Reserved height (points) for the footer band on every PDF page.
-# Includes the spec's 9pt top + 9pt bottom padding plus an 8.5 pt
-# text line, with a sliver of slack for descenders / metric drift.
-_PDF_FOOTER_H_PT = 30
+# Reserved heights (points) for the painted bands.  All chrome
+# lives outside the QTextDocument's body — the doc just reserves
+# this much vertical real estate at the top of page 1 and at the
+# bottom of every page so painted overlays don't overlap the table.
+_PDF_HEADER_H_PT    = 64   # 14 padding + 36 logo + 14 padding
+_PDF_SUBHEADER_H_PT = 26   # 7 padding + 12 text-line + 7 padding
+_PDF_FOOTER_H_PT    = 30   # 9 padding + 8.5 text + 9 padding + slack
+
+
+def _paint_pdf_header(painter, page_w_dp: float, header_h_dp: float,
+                      pt_to_dp: float, *, show_title: str,
+                      exported_date: str, logo_pixmap) -> None:
+    """
+    Black 3-column header band painted on top of page 1.
+       Left:    optional logo (max 36 pt tall) — empty cell if None
+       Centre:  two-line title block, centre-aligned
+       Right:   ØJE square mark + brand text inline
+    Spec colours / sizes inlined here rather than via theme tokens
+    because the PDF lives in a separate visual system from the live
+    UI (a bright printable surface vs. a dark stage monitor).
+    """
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QBrush, QColor, QFont, QPen
+
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor("#0d0d0d")))
+    painter.drawRect(QRectF(0, 0, page_w_dp, header_h_dp))
+    painter.restore()
+
+    pad_x = 24 * pt_to_dp
+    pad_y = 14 * pt_to_dp
+    inner_h = header_h_dp - pad_y * 2
+
+    # Three-column split: left 25 %, centre 50 %, right 25 %.
+    col_w = page_w_dp / 4
+    left_x   = pad_x
+    centre_x = col_w
+    centre_w = col_w * 2
+    right_x  = col_w * 3
+    right_w  = col_w - pad_x
+
+    # ── Left: logo ────────────────────────────────────────────────
+    if logo_pixmap is not None and not logo_pixmap.isNull():
+        max_logo_h = 36 * pt_to_dp
+        scaled = logo_pixmap.scaledToHeight(
+            int(max_logo_h),
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        ly = (header_h_dp - scaled.height()) / 2
+        painter.drawPixmap(int(left_x), int(ly), scaled)
+
+    # ── Centre: title block ───────────────────────────────────────
+    centre_rect = QRectF(centre_x, pad_y, centre_w, inner_h)
+    painter.save()
+    f_title = QFont("Helvetica")
+    f_title.setPointSizeF(15)
+    f_title.setWeight(QFont.Weight.Medium)
+    painter.setFont(f_title)
+    painter.setPen(QColor("#ffffff"))
+    fm_title = painter.fontMetrics()
+    title_text = f"{show_title} — Master Cue List"
+    title_h = fm_title.height()
+    painter.drawText(
+        QRectF(centre_x, pad_y, centre_w, title_h),
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+        title_text,
+    )
+    f_meta = QFont("Courier")
+    f_meta.setPointSizeF(9)
+    painter.setFont(f_meta)
+    meta_color = QColor("#ffffff")
+    meta_color.setAlphaF(0.35)
+    painter.setPen(meta_color)
+    painter.drawText(
+        QRectF(centre_x, pad_y + title_h + 2 * pt_to_dp,
+               centre_w, fm_title.height()),
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+        f"Exported {exported_date}",
+    )
+    painter.restore()
+
+    # ── Right: ØJE mark + brand text ──────────────────────────────
+    mark_size = 26 * pt_to_dp
+    mark_y = (header_h_dp - mark_size) / 2
+    painter.save()
+    border_color = QColor("#ffffff")
+    border_color.setAlphaF(0.60)
+    pen = QPen(border_color)
+    pen.setWidthF(max(1.0, 1 * pt_to_dp))
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    radius = 4 * pt_to_dp
+    mark_rect = QRectF(right_x, mark_y, mark_size, mark_size)
+    painter.drawRoundedRect(mark_rect, radius, radius)
+    f_mark = QFont("Helvetica")
+    f_mark.setPointSizeF(8)
+    f_mark.setWeight(QFont.Weight.Bold)
+    painter.setFont(f_mark)
+    painter.setPen(QColor("#ffffff"))
+    painter.drawText(
+        mark_rect,
+        Qt.AlignmentFlag.AlignCenter,
+        "ØJE",
+    )
+    painter.restore()
+
+    # Brand text block to the right of the mark.
+    text_x = right_x + mark_size + 8 * pt_to_dp
+    text_w = right_w - mark_size - 8 * pt_to_dp
+    painter.save()
+    f_brand = QFont("Helvetica")
+    f_brand.setPointSizeF(10)
+    f_brand.setWeight(QFont.Weight.Medium)
+    painter.setFont(f_brand)
+    brand_color = QColor("#ffffff")
+    brand_color.setAlphaF(0.75)
+    painter.setPen(brand_color)
+    fm_brand = painter.fontMetrics()
+    brand_h = fm_brand.height()
+    text_top = (header_h_dp - brand_h - 2 * pt_to_dp - brand_h) / 2
+    painter.drawText(
+        QRectF(text_x, text_top, text_w, brand_h),
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        "CUE MONITOR",
+    )
+    f_sub = QFont("Helvetica")
+    f_sub.setPointSizeF(8)
+    painter.setFont(f_sub)
+    sub_color = QColor("#ffffff")
+    sub_color.setAlphaF(0.28)
+    painter.setPen(sub_color)
+    painter.drawText(
+        QRectF(text_x, text_top + brand_h + 2 * pt_to_dp,
+               text_w, fm_brand.height()),
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        "by ØJE Studio",
+    )
+    painter.restore()
+
+
+def _paint_pdf_subheader(painter, page_w_dp: float, subheader_h_dp: float,
+                         pt_to_dp: float, *, section_count: int,
+                         cue_count: int, dup_count: int,
+                         total_pages: int) -> None:
+    """
+    Cream summary strip painted directly under the header on page 1.
+       Left:   Sections N · Total cues N · Duplicate timecodes N
+       Right:  Page 1 of N
+    """
+    from PyQt6.QtCore import QRectF
+    from PyQt6.QtGui import QBrush, QColor, QFont
+
+    # Background + bottom hairline border.
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor("#f5f2ed")))
+    painter.drawRect(QRectF(0, 0, page_w_dp, subheader_h_dp))
+    painter.setPen(QColor("#e0d8cf"))
+    border_w = max(1, round(0.5 * pt_to_dp))
+    painter.drawRect(QRectF(0, subheader_h_dp - border_w,
+                            page_w_dp, border_w))
+    painter.restore()
+
+    pad_x = 24 * pt_to_dp
+
+    # Left side: counts.  We paint each labelled-number pair as
+    # two separate runs so the labels can stay #888 while the
+    # numbers go #333 (or amber when dups > 0).  Painting from
+    # left to right; advance the cursor by the rendered width.
+    f_label = QFont("Helvetica")
+    f_label.setPointSizeF(9.5)
+    f_num = QFont("Helvetica")
+    f_num.setPointSizeF(9.5)
+    f_num.setWeight(QFont.Weight.Medium)
+    f_sep = QFont("Helvetica")
+    f_sep.setPointSizeF(9.5)
+
+    label_color = QColor("#888")
+    num_color   = QColor("#333")
+    sep_color   = QColor("#aaa")
+    amber_color = QColor("#b45309")
+
+    def draw(text: str, font, color: QColor, x: float) -> float:
+        painter.setFont(font)
+        painter.setPen(color)
+        fm = painter.fontMetrics()
+        w = fm.horizontalAdvance(text)
+        painter.drawText(
+            QRectF(x, 0, w, subheader_h_dp),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            text,
+        )
+        return x + w
+
+    painter.save()
+    cursor = pad_x
+    cursor = draw("Sections ", f_label, label_color, cursor)
+    cursor = draw(str(section_count), f_num, num_color, cursor)
+    cursor = draw(" · ", f_sep, sep_color, cursor)
+    cursor = draw("Total cues ", f_label, label_color, cursor)
+    cursor = draw(str(cue_count), f_num, num_color, cursor)
+    cursor = draw(" · ", f_sep, sep_color, cursor)
+    cursor = draw("Duplicate timecodes ", f_label, label_color, cursor)
+    dup_text_color = amber_color if dup_count else num_color
+    cursor = draw(str(dup_count), f_num, dup_text_color, cursor)
+    painter.restore()
+
+    # Right side: page indicator.
+    painter.save()
+    f_page = QFont("Helvetica")
+    f_page.setPointSizeF(9.5)
+    painter.setFont(f_page)
+    painter.setPen(QColor("#888"))
+    text = f"Page 1 of {total_pages}"
+    fm = painter.fontMetrics()
+    w = fm.horizontalAdvance(text)
+    painter.drawText(
+        QRectF(page_w_dp - pad_x - w, 0, w, subheader_h_dp),
+        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+        text,
+    )
+    painter.restore()
 
 
 def _paint_pdf_footer(painter, page_w_dp: float, footer_h_dp: float,
