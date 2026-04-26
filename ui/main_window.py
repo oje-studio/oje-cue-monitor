@@ -595,9 +595,11 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_export_pdf)
 
         # ── Settings ─────────────────────────
-        # On macOS this is promoted into the app menu under "Preferences".
+        # NOTE: don't set PreferencesRole — macOS would move the item into
+        # the app menu and leave the Settings menu empty (looks like a
+        # bug). Keep it in the Settings menu where the operator can find
+        # it from the menubar directly.
         a_settings = QAction("Settings…", self)
-        a_settings.setMenuRole(QAction.MenuRole.PreferencesRole)
         a_settings.setShortcut(QKeySequence("Ctrl+,"))
         a_settings.triggered.connect(self._open_settings)
         m_settings = bar.addMenu("&Settings")
