@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QPixmap, QImage
 
 from web_remote import get_local_ip, generate_qr_data_uri
+from ui import theme
 
 import base64
 
@@ -36,14 +37,14 @@ class RemotePanel(QDialog):
         title = QLabel("Remote Access — Performance View")
         ft = QFont(); ft.setPointSize(16); ft.setBold(True)
         title.setFont(ft)
-        title.setStyleSheet("color: #dcdcdc;")
+        title.setStyleSheet(f"color: {theme.TEXT_PRIMARY};")
         root.addWidget(title)
 
         hint = QLabel(
             "Devices on the same WiFi network can open one shared link.\n"
             "On the page they choose operator name and enter the password shown below."
         )
-        hint.setStyleSheet("color: #888; font-size: 12px;")
+        hint.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 12px;")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
@@ -64,43 +65,53 @@ class RemotePanel(QDialog):
             base_url,
         ))
 
+        pwd_frame_qss = (
+            f"QFrame {{ background: {theme.BG_SURFACE}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_LG}px; }}"
+        )
+        pwd_tag_qss = (
+            f"color: {theme.TEXT_DIM}; font-size: 11px; "
+            "font-weight: bold; letter-spacing: 2px;"
+        )
+
         if password:
             pwd_frame = QFrame()
-            pwd_frame.setStyleSheet(
-                "QFrame { background: #111; border: 1px solid #333; border-radius: 8px; }"
-            )
+            pwd_frame.setStyleSheet(pwd_frame_qss)
             pwd_lay = QVBoxLayout(pwd_frame)
             pwd_lay.setContentsMargins(14, 12, 14, 12)
             pwd_lay.setSpacing(4)
 
             pwd_tag = QLabel("ACCESS PASSWORD")
-            pwd_tag.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
+            pwd_tag.setStyleSheet(pwd_tag_qss)
             pwd_lay.addWidget(pwd_tag)
 
             pwd = QLabel(password)
-            pwd.setStyleSheet("color: #f0f0f0; font-size: 24px; font-weight: bold;")
+            pwd.setStyleSheet(
+                f"color: {theme.TEXT_BRIGHT}; font-size: 24px; font-weight: bold;"
+            )
             pwd.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             pwd_lay.addWidget(pwd)
             clay.addWidget(pwd_frame)
         else:
             pwd_frame = QFrame()
-            pwd_frame.setStyleSheet(
-                "QFrame { background: #111; border: 1px solid #333; border-radius: 8px; }"
-            )
+            pwd_frame.setStyleSheet(pwd_frame_qss)
             pwd_lay = QVBoxLayout(pwd_frame)
             pwd_lay.setContentsMargins(14, 12, 14, 12)
             pwd_lay.setSpacing(4)
 
             pwd_tag = QLabel("ACCESS PASSWORD")
-            pwd_tag.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; letter-spacing: 2px;")
+            pwd_tag.setStyleSheet(pwd_tag_qss)
             pwd_lay.addWidget(pwd_tag)
 
             pwd = QLabel("Not set")
-            pwd.setStyleSheet("color: #c8c8c8; font-size: 18px; font-weight: bold;")
+            pwd.setStyleSheet(
+                f"color: {theme.TEXT_MUTED}; font-size: 18px; font-weight: bold;"
+            )
             pwd_lay.addWidget(pwd)
 
             pwd_hint = QLabel("Open Settings to add a password for phones and tablets.")
-            pwd_hint.setStyleSheet("color: #777; font-size: 11px;")
+            pwd_hint.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 11px;")
             pwd_hint.setWordWrap(True)
             pwd_lay.addWidget(pwd_hint)
             clay.addWidget(pwd_frame)
@@ -118,7 +129,9 @@ class RemotePanel(QDialog):
     def _make_entry(self, label: str, url: str) -> QFrame:
         frame = QFrame()
         frame.setStyleSheet(
-            "QFrame { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; }"
+            f"QFrame {{ background: {theme.BG_SURFACE}; "
+            f"border: 1px solid {theme.BORDER}; "
+            f"border-radius: {theme.RADIUS_MD}px; }}"
         )
         lay = QHBoxLayout(frame)
         lay.setContentsMargins(12, 10, 12, 10)
@@ -139,7 +152,7 @@ class RemotePanel(QDialog):
             qr_lbl.setPixmap(pix)
         else:
             qr_lbl.setText("(no qrcode)")
-            qr_lbl.setStyleSheet("color: #555; font-size: 10px;")
+            qr_lbl.setStyleSheet(f"color: {theme.TEXT_DISABLED}; font-size: 10px;")
         qr_lbl.setFixedSize(180, 180)
         lay.addWidget(qr_lbl)
 
@@ -148,11 +161,15 @@ class RemotePanel(QDialog):
         info_lay.setSpacing(4)
 
         name_lbl = QLabel(label)
-        name_lbl.setStyleSheet("color: #dcdcdc; font-weight: bold; font-size: 13px;")
+        name_lbl.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; font-weight: bold; font-size: 13px;"
+        )
         info_lay.addWidget(name_lbl)
 
         url_lbl = QLabel(url)
-        url_lbl.setStyleSheet("color: #4a90d9; font-size: 12px; font-family: Menlo;")
+        url_lbl.setStyleSheet(
+            f"color: {theme.SEMANTIC_INFO}; font-size: 12px; font-family: Menlo;"
+        )
         url_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         info_lay.addWidget(url_lbl)
 
@@ -165,5 +182,5 @@ class RemotePanel(QDialog):
 def _hline() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("color: #333;")
+    f.setStyleSheet(f"color: {theme.BORDER};")
     return f
