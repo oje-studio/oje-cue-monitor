@@ -209,6 +209,12 @@ class WebRemoteServer:
         return web.json_response(self._current_state)
 
     def _is_authenticated(self, request) -> bool:
+        # No password configured = no auth. The remote loads straight to the
+        # cue list, no login overlay — this matches the pre-Codex behaviour
+        # operators were used to. Set a remote password in Settings to gate
+        # access (the login form is then enforced).
+        if not self._remote_password:
+            return True
         return request.cookies.get(AUTH_COOKIE) == "1"
 
 
