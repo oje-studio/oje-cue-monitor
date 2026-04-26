@@ -359,9 +359,10 @@ body {{
 .statusbar .dot.ok {{ color: #4bc373; }}
 .statusbar .tc {{
     color: #f0f0f0;
-    /* Reserve max width for HH:MM:SS:FF so the bar doesn't reflow when
-       the value goes from "--" to "10:00:00:00". */
-    min-width: 9.5ch;
+    /* Reserve max width for HH:MM:SS so the bar doesn't reflow when
+       the value goes from "--:--:--" to "10:00:00". (Frames stripped
+       client-side for smoother updates — see trimTC.) */
+    min-width: 8ch;
     text-align: center;
 }}
 .statusbar .meta {{ color: #858585; }}
@@ -705,7 +706,7 @@ body {{
 <!-- Top status bar — same shape as the Performance Mode header. -->
 <div class="statusbar">
     <span class="dot" id="signal-dot">●</span>
-    <span class="tc" id="timecode">--:--:--:--</span>
+    <span class="tc" id="timecode">--:--:--</span>
     <span class="sep">|</span>
     <span class="meta" id="fps">FPS --</span>
     <span class="sep">|</span>
@@ -841,8 +842,20 @@ let _nxtCueSig = '';
 let _curOpsSig = '';
 let _nxtOpsSig = '';
 
+// Strip the trailing :FF (frames) from the LTC timecode for the web
+// display. The web view is a reference monitor — operators don't need
+// frame-level precision here, and dropping frames means the timecode
+// label only updates once per second instead of ~25× per second, which
+// is dramatically smoother on iOS Safari (and saves a lot of layout
+// work everywhere).
+function trimTC(tc) {{
+    if (!tc) return '--:--:--';
+    const parts = tc.split(':');
+    return parts.length >= 3 ? parts.slice(0, 3).join(':') : tc;
+}}
+
 function render(state) {{
-    setText('timecode', state.timecode || '--:--:--:--');
+    setText('timecode', trimTC(state.timecode));
     setText('cur-group', state.current_group ? '[' + state.current_group + ']' : '');
     setText('next-group', state.next_group ? '[' + state.next_group + ']' : '');
 
