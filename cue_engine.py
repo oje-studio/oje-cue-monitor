@@ -210,10 +210,10 @@ class CueEngine:
         cues share the same timecode, the later one in list order wins
         (matches the duplicate-TC warning shown in the editor).
 
-        End-of-show rule: if the playhead has run past every cue and
-        there's no next cue queued, current immediately becomes None so
-        the UI shows "No cue at this timecode". The last cue is no
-        longer held on screen.
+        Once a cue has fired it stays "current" until the next one fires
+        (and after the last cue, indefinitely). A None result only means
+        "the playhead is before any cue" — we use that to show
+        "No cue at this timecode" in the UI.
         """
         self._prev_frames = tc_frames
         best_idx = -1
@@ -225,23 +225,9 @@ class CueEngine:
                 best_idx = i
                 best_frames = cue.frames
         self._active_index = best_idx
-        if not (0 <= best_idx < len(self.cues)):
-            return None
-
-        # If there's no next cue queued in list order AND the playhead
-        # has moved past the matched cue's exact frame, treat the show
-        # as ended — operators don't want a stale "current" cue lingering
-        # after the LTC has run past the last hit.
-        if not self._has_next_cue_after(best_idx) and tc_frames > best_frames:
-            return None
-        return self.cues[best_idx]
-
-    def _has_next_cue_after(self, index: int) -> bool:
-        for j in range(index + 1, len(self.cues)):
-            c = self.cues[j]
-            if not c.is_divider and c.has_timecode:
-                return True
-        return False
+        if 0 <= best_idx < len(self.cues):
+            return self.cues[best_idx]
+        return None
 
     def get_next_cue(self, tc_frames: int) -> Optional[Cue]:
         """
