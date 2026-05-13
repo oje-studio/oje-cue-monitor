@@ -381,7 +381,17 @@ body {{
     color: var(--danger);
     line-height: 1;
 }}
-.statusbar .dot.ok {{ color: var(--success); }}
+.statusbar .dot.ok {{
+    color: var(--success);
+    /* Pulse while live — gives a quick at-a-glance "yes the signal
+       is alive" without the operator needing to read the LIVE text.
+       Opacity-only (not transform) keeps the glyph crisp. */
+    animation: pulse 1.6s ease-in-out infinite;
+}}
+@keyframes pulse {{
+    0%, 100% {{ opacity: 0.45; }}
+    50%      {{ opacity: 1;    }}
+}}
 .statusbar .tc {{
     color: var(--text-primary);
     /* Reserve max width for HH:MM:SS so the bar doesn't reflow when
@@ -457,9 +467,13 @@ body {{
     color: var(--text-bright);
 }}
 .cue-desc {{
-    font-size: clamp(14px, 2.6vw, 22px);
+    /* Floor 16 px so the cue's contextual line isn't smaller than
+       the operator commands below it (those are 18 px min). Keeps
+       hierarchy "cue name > cue desc > operator commands" intact
+       without pinching the lead-in too small to read on a phone. */
+    font-size: clamp(16px, 2.8vw, 24px);
     color: var(--text-muted);
-    line-height: 1.35;
+    line-height: 1.4;
 }}
 /* Shown only when state.current_cue is null — same intent as the
    cue-table empty placeholder (b7) on the desktop, just sized
@@ -490,28 +504,63 @@ body {{
     margin-top: 4px;
 }}
 .op-card {{
-    background: var(--bg-surface);
-    border-radius: var(--radius-lg);
-    padding: 12px 14px;
-    border: 1px solid var(--border);
+    /* Reductive: no background or border box, just a 3 px coloured
+       stripe in the role's semantic colour. Same information density
+       as the old card, but the role reads as colour in peripheral
+       vision and as a label in focal vision — without the brutalist
+       panel chrome that competed with the cue name above. */
+    background: transparent;
+    border: none;
+    border-left: 3px solid var(--text-dim);
+    border-radius: 0;
+    padding: 2px 0 2px 12px;
 }}
 .op-name {{
-    /* Per-operator semantic colour comes from inline style="color:..."
-       set by renderOps() — Lighting blue, Audio amber, Stage Manager
-       purple, etc.  This rule sets everything BUT the colour. */
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    margin-bottom: 4px;
+    /* Per-operator semantic colour comes from inline style set by
+       renderOps(): both `color` here and `border-left-color` on the
+       parent .op-card use the same value, so the role label and the
+       stripe always agree.
+       Size is deliberately on the large side for a label — on a
+       phone in a low-lit FOH position the operator reads the role
+       at a glance, not up close, and the previous 10–12 px was
+       borderline. 14 px / weight 700 is the floor that still reads
+       across the dark. */
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    margin-bottom: 3px;
 }}
 .op-comment {{
-    font-size: clamp(15px, 3vw, 22px);
+    /* Floor 18 px on phones, ceiling 24 px on desktops. The command
+       text is the thing the operator actually has to read, so this
+       is the upper bound of "comfortable single-glance" rather than
+       the lower bound. line-height 1.4 keeps multi-line comments
+       from running together when the role's note spans two rows. */
+    font-size: clamp(18px, 3.4vw, 24px);
     color: var(--text-bright);
     word-wrap: break-word;
     white-space: pre-wrap;
-    line-height: 1.35;
+    line-height: 1.4;
+    font-weight: 500;
 }}
+/* Cue-change slide-in. Re-triggered from JS (retriggerSlideIn) when
+   the cue id changes, so the new cue name physically arrives instead
+   of just popping in. Helps the operator feel the moment a cue
+   actually fires — important on shows where they can't easily
+   verify the change another way. */
+@keyframes slideIn {{
+    from {{ opacity: 0; transform: translateY(8px); }}
+    to   {{ opacity: 1; transform: translateY(0);   }}
+}}
+.cue-name.fresh,
+.cue-desc.fresh,
+.op-card.fresh {{
+    animation: slideIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}}
+.op-card.fresh:nth-child(2) {{ animation-delay: 0.05s; }}
+.op-card.fresh:nth-child(3) {{ animation-delay: 0.10s; }}
+.op-card.fresh:nth-child(4) {{ animation-delay: 0.15s; }}
 
 /* ── Bottom: Next cue strip ──────────────────────────────────────────────── */
 .next-strip {{
@@ -531,24 +580,33 @@ body {{
 }}
 .next-info {{ min-width: 0; }}
 .next-tag {{
-    font-size: 10px;
+    /* Bumped 10 → 11 px so the label doesn't disappear at arm's
+       length on a phone. Still quiet enough to stay decoration. */
+    font-size: 11px;
     color: var(--text-dim);
     font-weight: 600;
     letter-spacing: 2px;
     margin-bottom: 2px;
 }}
 .next-name {{
-    font-size: clamp(16px, 3.6vw, 26px);
+    /* Floor 18 px (was 16). The operator scans this 5–10 s before
+       their cue fires — needs to be readable in peripheral vision,
+       not just on direct gaze. */
+    font-size: clamp(18px, 3.6vw, 28px);
     font-weight: 700;
     color: var(--text-primary);
-    line-height: 1.2;
+    line-height: 1.25;
     overflow: hidden;
     text-overflow: ellipsis;
 }}
 .next-desc {{
-    font-size: clamp(11px, 2vw, 15px);
+    /* Floor 13 px (was 11). 11 px on a phone in low light was
+       effectively decoration — bumping to 13 keeps the strip
+       compact but makes the lead-in actually parseable. */
+    font-size: clamp(13px, 2.2vw, 17px);
     color: var(--text-muted);
     margin-top: 2px;
+    line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
 }}
@@ -563,7 +621,26 @@ body {{
     min-width: 7ch;
     text-align: right;
 }}
-.countdown.urgent {{ color: var(--danger); }}
+.countdown.urgent {{
+    color: var(--danger);
+    /* Inline-flex so the clock SVG (added by JS when urgent) sits
+       on the same baseline as the digits. Gap keeps the icon clear
+       of the leading "0" without manual padding tweaks. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}}
+.countdown.urgent .cd-icon {{
+    /* Spinning clock face — second redundant channel for the
+       <10 s warning so a colour-blind operator still gets motion +
+       icon, not just a red number. */
+    animation: cdSpin 1s linear infinite;
+    flex: 0 0 auto;
+}}
+@keyframes cdSpin {{
+    to {{ transform: rotate(360deg); }}
+}}
 .next-ops {{
     grid-column: 1 / -1;
     display: flex;
@@ -572,10 +649,15 @@ body {{
     margin-top: 6px;
 }}
 .next-op {{
-    font-size: clamp(11px, 2.2vw, 14px);
+    /* Floor 13 px on tablet+ (this row is hidden on phone via the
+       max-width 600 media query, since multiple operator notes
+       crowd the strip). Ceiling 16 so prep notes are reasonably
+       sized on a stage monitor. */
+    font-size: clamp(13px, 2.4vw, 16px);
     color: var(--text-bright);
     font-style: normal;
     white-space: pre-wrap;
+    line-height: 1.4;
 }}
 .next-op-name {{
     /* Per-operator semantic colour set inline by renderNextOps. */
@@ -893,6 +975,17 @@ function setColor(id, color) {{
     if (el && el.style.color !== color) el.style.color = color;
 }}
 
+// Re-trigger a CSS animation by toggling the .fresh class. CSS
+// animations don't replay on a class re-add unless the browser sees
+// the class transition through the layout pipeline, hence the
+// `void offsetWidth` reflow nudge.
+function retriggerSlideIn(el) {{
+    if (!el) return;
+    el.classList.remove('fresh');
+    void el.offsetWidth;
+    el.classList.add('fresh');
+}}
+
 // Caches that stop renderOps / renderNextOps from rebuilding their
 // inner HTML when the cue id and operator-comments dict are unchanged
 // (which is most ticks — the cue only changes occasionally).
@@ -980,6 +1073,10 @@ function render(state) {{
         _curCueSig = curSig;
         setText('cur-name', cur ? (cur.name || '—') : '—');
         setText('cur-desc', cur ? (cur.description || '') : '');
+        // Slide the new cue in physically — gives the operator a
+        // visible "moment" when a cue actually fires.
+        retriggerSlideIn(document.getElementById('cur-name'));
+        retriggerSlideIn(document.getElementById('cur-desc'));
     }}
     const curOpsSig = cur ? JSON.stringify(cur.operator_comments || {{}}) : '';
     if (curOpsSig !== _curOpsSig) {{
@@ -1008,11 +1105,36 @@ function render(state) {{
         const m = Math.floor(cd / 60);
         const s = Math.floor(cd % 60);
         const cdText = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-        if (cdEl.textContent !== cdText) cdEl.textContent = cdText;
-        const want = cd < 10 ? 'countdown urgent' : 'countdown';
-        if (cdEl.className !== want) cdEl.className = want;
+        const urgent = cd < 10;
+        const want = urgent ? 'countdown urgent' : 'countdown';
+        if (cdEl.className !== want) {{
+            // Only rebuild innerHTML on the urgent <→> calm transition.
+            // Rebuilding every tick would reset the spinning SVG's
+            // animation phase to 0° each second — looks broken.
+            cdEl.className = want;
+            if (urgent) {{
+                cdEl.innerHTML =
+                  '<svg class="cd-icon" width="14" height="14" ' +
+                  'viewBox="0 0 16 16" fill="none" stroke="currentColor" ' +
+                  'stroke-width="2" stroke-linecap="round" ' +
+                  'stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/>' +
+                  '<path d="M8 4.5v3.7l2.5 2"/></svg>' +
+                  '<span class="cd-text">' + cdText + '</span>';
+            }} else {{
+                cdEl.textContent = cdText;
+            }}
+        }} else if (urgent) {{
+            const span = cdEl.querySelector('.cd-text');
+            if (span && span.textContent !== cdText) span.textContent = cdText;
+        }} else if (cdEl.textContent !== cdText) {{
+            cdEl.textContent = cdText;
+        }}
     }} else if (cdEl.textContent !== '') {{
         cdEl.textContent = '';
+        // Clear urgent class so a fresh "next cue is far away" state
+        // doesn't keep the inline-flex / SVG remnants on a hidden
+        // element.
+        if (cdEl.className !== 'countdown') cdEl.className = 'countdown';
     }}
 }}
 
@@ -1030,14 +1152,24 @@ function renderOps(containerId, comments) {{
     if (currentOperator) {{
         const comment = comments[currentOperator] || '';
         if (comment) {{
-            el.innerHTML = '<div class="op-card solo"><div class="op-comment">' +
+            // Solo mode: operator is filtering to themselves. Give the
+            // single card the role's colour stripe so the operator
+            // still gets their familiar colour identity even without
+            // the header label.
+            const color = opColor(currentOperator);
+            el.innerHTML = '<div class="op-card solo fresh" style="border-left-color:' +
+                color + '"><div class="op-comment">' +
                 escHtml(comment) + '</div></div>';
         }}
     }} else {{
         for (const [name, comment] of Object.entries(comments)) {{
             if (!comment) continue;
-            el.innerHTML += '<div class="op-card"><div class="op-name" style="color:' +
-                opColor(name) + '">' +
+            // Inline border-left-color and label colour share the
+            // same `opColor(name)` value so the role reads both as
+            // a peripheral stripe and as a focal label.
+            const color = opColor(name);
+            el.innerHTML += '<div class="op-card fresh" style="border-left-color:' +
+                color + '"><div class="op-name" style="color:' + color + '">' +
                 escHtml(name) + '</div><div class="op-comment">' +
                 escHtml(comment) + '</div></div>';
         }}

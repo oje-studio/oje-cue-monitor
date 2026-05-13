@@ -117,6 +117,11 @@ class CueCard(QFrame):
         )
         self._countdown_enabled = True
         self._operator_names: list = []
+        # Stash the card's title so the empty state can read "the
+        # current cue will appear here..." vs "the next cue..." —
+        # specific wording reads as intentional placeholder, not
+        # broken UI.
+        self._title = title
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(6)
@@ -128,14 +133,13 @@ class CueCard(QFrame):
         )
         lay.addWidget(tl)
 
-        self.name_lbl = QLabel("—")
+        self.name_lbl = QLabel()
         fn = QFont(); fn.setPointSize(20); fn.setBold(True)
         self.name_lbl.setFont(fn)
         self.name_lbl.setWordWrap(True)
-        self.name_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         lay.addWidget(self.name_lbl)
 
-        self.desc_lbl = QLabel("")
+        self.desc_lbl = QLabel()
         self.desc_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 13px;")
         self.desc_lbl.setWordWrap(True)
         lay.addWidget(self.desc_lbl)
@@ -153,18 +157,35 @@ class CueCard(QFrame):
 
         lay.addStretch()
 
+        # Seed the empty placeholder so a fresh window doesn't open
+        # showing a bare em-dash that reads as "broken". Called after
+        # all child labels exist.
+        self._apply_empty_state()
+
     def set_countdown_enabled(self, enabled: bool):
         self._countdown_enabled = enabled
 
     def set_operators(self, operator_names: list):
         self._operator_names = list(operator_names)
 
+    def _apply_empty_state(self):
+        # Quieter than the live state: name in TEXT_DIM, no big
+        # contrast pop. Reads as "waiting" rather than "missing".
+        self.name_lbl.setText("Waiting for LTC")
+        self.name_lbl.setStyleSheet(f"color: {theme.TEXT_DIM};")
+        self.desc_lbl.setText(
+            f"The {self._title.lower()} will appear here once playback starts."
+        )
+        self.desc_lbl.setStyleSheet(f"color: {theme.TEXT_DIM}; font-size: 13px;")
+        self.cd_lbl.setText("")
+
     def set_cue(self, cue, countdown: float = None):
         if cue is None:
-            self.name_lbl.setText("—")
-            self.desc_lbl.setText("")
-            self.cd_lbl.setText("")
+            self._apply_empty_state()
             return
+        # Restore bright styling when transitioning out of empty state.
+        self.name_lbl.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
+        self.desc_lbl.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 13px;")
         self.name_lbl.setText(cue.name or "—")
         self.desc_lbl.setText(cue.description)
         if countdown is not None and self._countdown_enabled:
@@ -174,7 +195,11 @@ class CueCard(QFrame):
             # a separate flashing indicator.
             color = (theme.SEMANTIC_DANGER if countdown < 10
                      else theme.TEXT_BRIGHT)
-            self.cd_lbl.setText(f"in {m:02d}:{s:02d}")
+            # "→ 02:50" reads as a forward-pointer to a future event
+            # without the slightly awkward English of "in 02:50".
+            # Same visual idea as QLab/Mitti's countdown chip and
+            # matches the chevron-style countdown in the web remote.
+            self.cd_lbl.setText(f"→ {m:02d}:{s:02d}")
             self.cd_lbl.setStyleSheet(f"color: {color}; font-size: 16px;")
         else:
             self.cd_lbl.setText("")
