@@ -193,8 +193,12 @@ class PerformanceView(QWidget):
         top_row.addWidget(self._curr_tag)
 
         self._curr_group = QLabel("")
+        # Paritised with the next-group colour: SEMANTIC_INFO so both
+        # group labels read as the same vocabulary instead of two
+        # bespoke purples (#7a7acd vs #7AB7FF) that diverged over time.
         self._curr_group.setStyleSheet(
-            "color: #7a7acd; font-size: 13px; font-weight: bold; letter-spacing: 1px;"
+            f"color: {theme.SEMANTIC_INFO}; font-size: 13px; "
+            "font-weight: bold; letter-spacing: 1px;"
         )
         top_row.addWidget(self._curr_group)
         top_row.addStretch()
@@ -209,8 +213,15 @@ class PerformanceView(QWidget):
         # Cue name
         self._curr_name = QLabel("—")
         self._f_curr_name = sans_font(56, bold=True)
+        # Negative tracking at display sizes pulls letters together
+        # so "DROP — TRACK 03" reads as a single phrase instead of a
+        # row of spaced-out glyphs. Helvetica/SF at 56pt drifts apart
+        # without this, which is the "2010-era" feel I want to lose.
+        self._f_curr_name.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, -2
+        )
         self._curr_name.setFont(self._f_curr_name)
-        self._curr_name.setStyleSheet("color: #ffffff;")
+        self._curr_name.setStyleSheet(f"color: {theme.TEXT_BRIGHT};")
         self._curr_name.setWordWrap(True)
         curr_lay.addWidget(self._curr_name)
 
@@ -219,7 +230,10 @@ class PerformanceView(QWidget):
         self._f_curr_desc = QFont()
         self._f_curr_desc.setPointSize(26)
         self._curr_desc.setFont(self._f_curr_desc)
-        self._curr_desc.setStyleSheet("color: #999999;")
+        # Was bespoke #999999, now uses theme.TEXT_MUTED so the
+        # current-cue description matches the next-cue description
+        # (both #a5a5a5) instead of being a hair darker.
+        self._curr_desc.setStyleSheet(f"color: {theme.TEXT_MUTED};")
         self._curr_desc.setWordWrap(True)
         curr_lay.addWidget(self._curr_desc)
 
@@ -423,6 +437,16 @@ class PerformanceView(QWidget):
         self._clock_timer = QTimer(self)
         self._clock_timer.timeout.connect(self._update_clock)
         self._clock_timer.start(1000)
+
+        # Pulse the signal dot when LTC is healthy — gives the operator
+        # the same at-a-glance "alive" signal as the web remote. Two-step
+        # opacity toggle (full / 0.45) on an 800 ms interval lands close
+        # to the web's 1.6 s pulse without needing real CSS keyframes.
+        # `update_signal_state` starts/stops this depending on signal_ok.
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(800)
+        self._pulse_timer.timeout.connect(self._pulse_signal_dot)
+        self._pulse_phase = 0
         self._update_clock()
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -544,7 +568,34 @@ class PerformanceView(QWidget):
         self._signal_state_lbl.setText(state_text)
         self._signal_state_lbl.setStyleSheet(f"color: {state_color};")
         self._signal_level_lbl.setStyleSheet(f"color: {level_color};")
-        self._signal_dot_lbl.setStyleSheet(f"color: {dot_color}; font-size: 18px;")
+
+        # When the signal is healthy (LIVE, no warning), the pulse
+        # owns the dot's colour — start the timer and let _pulse_signal_dot
+        # handle every repaint so we don't fight it with a static
+        # colour write here. Any other state (NO SIGNAL / WEAK /
+        # CLIPPING) needs a stable colour, so we stop the pulse and
+        # set the dot directly.
+        is_healthy_live = signal_ok and warning == ""
+        if is_healthy_live:
+            if not self._pulse_timer.isActive():
+                self._pulse_phase = 0
+                self._pulse_timer.start()
+                self._pulse_signal_dot()
+        else:
+            if self._pulse_timer.isActive():
+                self._pulse_timer.stop()
+            self._signal_dot_lbl.setStyleSheet(
+                f"color: {dot_color}; font-size: 18px;"
+            )
+
+    def _pulse_signal_dot(self):
+        """Two-step opacity toggle on the signal dot for a steady alive pulse."""
+        self._pulse_phase = (self._pulse_phase + 1) % 2
+        opacity = 1.0 if self._pulse_phase == 0 else 0.45
+        rgba = theme.with_alpha(theme.SEMANTIC_SUCCESS, opacity)
+        self._signal_dot_lbl.setStyleSheet(
+            f"color: {rgba}; font-size: 18px;"
+        )
 
     def set_cues(self, cues: List):
         self._cues = list(cues)
@@ -614,7 +665,11 @@ class PerformanceView(QWidget):
 
         for name in self._operator_names:
             lbl = QLabel()
-            f = QFont(); f.setPointSize(14); f.setItalic(True)
+            # Same upright weight as current-cue cards — italic was
+            # reading as a "footnote" but this is real prep info the
+            # operator scans 5–10 s before their cue, deserves equal
+            # presence to the live cue text.
+            f = QFont(); f.setPointSize(14)
             lbl.setFont(f)
             # Rich text so the role name can carry its semantic colour
             # while the comment line reads in white — same split as
@@ -661,9 +716,14 @@ class PerformanceView(QWidget):
                     # "<go>" doesn't get parsed as a (broken) tag.
                     safe_name = name.replace("<", "&lt;").replace(">", "&gt;")
                     safe_comment = comment.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                    # Paritised with the current-cue _OperatorCard:
+                    # Title Case (was UPPERCASE) so the same role
+                    # vocabulary appears in both blocks. No italics
+                    # on the comment either — italic notes read as
+                    # "afterthought" while this is prep info.
                     lbl.setText(
                         f"<span style='color:{color}; font-weight:bold;'>"
-                        f"{safe_name.upper()}</span><br>"
+                        f"{safe_name}</span><br>"
                         f"<span style='color:{theme.TEXT_BRIGHT};'>{safe_comment}</span>"
                     )
                     lbl.setVisible(True)
@@ -820,21 +880,22 @@ class _AutoShrinkLabel(QLabel):
             self.setFont(f)
 
 
-class _OperatorCard(QWidget):
-    """A single operator column card with name header + comment."""
+class _OperatorCard(QFrame):
+    """A single operator column card with name header + comment.
+
+    Reductive treatment (paritised with the web remote): no
+    background panel, no rounded border — just a 3 px coloured
+    stripe on the left in the operator's role colour. The role
+    reads as a peripheral colour cue (stripe) and as a focal label
+    (header text) without the brutalist card chrome competing with
+    the cue name above.
+    """
 
     def __init__(self, op_name: str, font_size: int = 20, name_size: int = 12,
                  name_color: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.op_name = op_name
         self._base_font_size = font_size
-        self.setStyleSheet(
-            f"background: {theme.BG_SURFACE}; "
-            f"border-radius: {theme.RADIUS_LG}px;"
-        )
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(4)
 
         # Operator role colour: per-operator override from settings if
         # provided, otherwise theme.operator_color() resolves the role
@@ -844,13 +905,35 @@ class _OperatorCard(QWidget):
         # column without reading the label.
         resolved_color = name_color or theme.operator_color(op_name)
 
-        self._name_lbl = QLabel(op_name.upper())
+        # Set the stripe via objectName-targeted stylesheet — without
+        # the explicit selector Qt applies the rule to every child
+        # widget too, painting borders inside the card.
+        self.setObjectName("OperatorCard")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet(
+            f"QFrame#OperatorCard {{ "
+            f"background: transparent; "
+            f"border: none; "
+            f"border-left: 3px solid {resolved_color}; "
+            f"border-radius: 0px; }}"
+        )
+        lay = QVBoxLayout(self)
+        # Tighter left margin so the text sits close to the stripe
+        # without a wide gutter; top/right/bottom unchanged.
+        lay.setContentsMargins(12, 6, 14, 6)
+        lay.setSpacing(4)
+
+        # Role label: Title Case from the operator's actual input
+        # (was .upper()-stripped), 14 pt floor so the label reads at
+        # arm's length on the FOH stage monitor. Letter-spacing
+        # dropped — Title Case at 14 pt doesn't need extra tracking.
+        self._name_lbl = QLabel(op_name)
         f_name = QFont()
-        f_name.setPointSize(name_size)
+        f_name.setPointSize(max(name_size, 14))
         f_name.setBold(True)
         self._name_lbl.setFont(f_name)
         self._name_lbl.setStyleSheet(
-            f"color: {resolved_color}; letter-spacing: 1.5px; background: transparent;"
+            f"color: {resolved_color}; background: transparent;"
         )
         lay.addWidget(self._name_lbl)
 
