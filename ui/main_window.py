@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from cue_engine import CueEngine, CueParseError
 from ltc_decoder import LTCDecoder, LTCLibError
 from show_file import ShowFile, ShowSettings
-from ui.cue_table import CueTable, CueEditToolbar, OperatorEditPanel
+from ui.cue_table import CueTable, CueEditToolbar, OperatorEditPanel, NAMED_COLORS
 from ui.fonts import mono_font, sans_font
 from ui.performance_view import PerformanceView
 from ui.settings_dialog import SettingsDialog
@@ -88,8 +88,10 @@ class VUMeter(QWidget):
 
     def paintEvent(self, _):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H  = self.width(), self.height()
         bw    = (W - (self.BARS - 1) * 2) // self.BARS
+        rad   = 2.0
         norm  = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
         lit   = int(norm * self.BARS)
         for i in range(self.BARS):
@@ -100,21 +102,25 @@ class VUMeter(QWidget):
                 c = ACCENT_ORANGE if i < lit else QColor(55, 40, 15)
             else:
                 c = ACCENT_GREEN if i < lit else QColor(25, 55, 35)
-            painter.fillRect(x, 2, bw, H - 4, c)
+            painter.setBrush(c)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(x, 2, bw, H - 4, rad, rad)
         painter.end()
 
 
 # ── Cue card ─────────────────────────────────────────────────────────────────
 
 class CueCard(QFrame):
+    _DEFAULT_QSS = (
+        f"CueCard {{ background: {theme.BG_SURFACE}; "
+        f"border: 1px solid {theme.BORDER}; "
+        f"border-radius: {theme.RADIUS_LG}px; }}"
+    )
+
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.Box)
-        self.setStyleSheet(
-            f"CueCard {{ background: {theme.BG_SURFACE}; "
-            f"border: 1px solid {theme.BORDER}; "
-            f"border-radius: {theme.RADIUS_LG}px; }}"
-        )
+        self.setStyleSheet(self._DEFAULT_QSS)
         self._countdown_enabled = True
         self._operator_names: list = []
         lay = QVBoxLayout(self)
@@ -164,9 +170,20 @@ class CueCard(QFrame):
             self.name_lbl.setText("—")
             self.desc_lbl.setText("")
             self.cd_lbl.setText("")
+            self.setStyleSheet(self._DEFAULT_QSS)
             return
         self.name_lbl.setText(cue.name or "—")
         self.desc_lbl.setText(cue.description)
+        cue_qc = NAMED_COLORS.get(cue.color) if cue.color else None
+        if cue_qc:
+            self.setStyleSheet(
+                f"CueCard {{ background: {theme.BG_SURFACE}; "
+                f"border: 1px solid {theme.BORDER}; "
+                f"border-left: 3px solid {cue_qc.name()}; "
+                f"border-radius: {theme.RADIUS_LG}px; }}"
+            )
+        else:
+            self.setStyleSheet(self._DEFAULT_QSS)
         if countdown is not None and self._countdown_enabled:
             m, s  = divmod(int(countdown), 60)
             # Sub-10-second countdown flips to the danger hue so the
@@ -424,10 +441,8 @@ class MainWindow(QMainWindow):
         fl.addStretch()
 
         # ── Right cluster: Remote → Performance → START ──────────────
-        # Reads left-to-right as the show-startup order:
-        #   Remote   — let the team's phones connect
-        #   Performance — bring the operator screen up
-        #   START    — arm LTC and run the show
+        fl.addWidget(_vline())
+
         self._btn_remote = QPushButton(" Remote")
         self._btn_remote.setIcon(make_icon("remote", theme.TEXT_PRIMARY))
         self._btn_remote.setIconSize(icon_size(16))
@@ -1659,6 +1674,7 @@ def _start_btn_style() -> str:
         f"border: none; border-radius: {theme.RADIUS_MD}px; "
         f"padding: 0 14px; }}"
         f"QPushButton:hover {{ background: {theme.ACTION_PRIMARY_HOVER}; }}"
+        f"QPushButton:pressed {{ background: #28A85E; }}"
     )
 
 
@@ -1670,6 +1686,7 @@ def _stop_btn_style() -> str:
         f"border: none; border-radius: {theme.RADIUS_MD}px; "
         f"padding: 0 14px; }}"
         f"QPushButton:hover {{ background: #ED5A5F; }}"
+        f"QPushButton:pressed {{ background: #C93E43; }}"
     )
 
 
@@ -1692,7 +1709,9 @@ def _secondary_btn_style() -> str:
         f"QPushButton:checked {{ background: rgba(122, 183, 255, 0.14); "
         f"color: {theme.SEMANTIC_INFO}; "
         f"border-color: {theme.SEMANTIC_INFO}; }}"
+        f"QPushButton:pressed {{ background: #1a1a1a; }}"
         f"QPushButton:checked:hover {{ background: rgba(122, 183, 255, 0.22); }}"
+        f"QPushButton:checked:pressed {{ background: rgba(122, 183, 255, 0.10); }}"
     )
 
 
@@ -1704,6 +1723,7 @@ def _help_btn_style() -> str:
         f"border-radius: 14px; font-weight: bold; font-size: 13px; }}"
         f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; "
         f"border-color: {theme.BORDER_STRONG}; }}"
+        f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
     )
 
 

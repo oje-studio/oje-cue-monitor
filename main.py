@@ -107,6 +107,13 @@ def main():
         }
         QPushButton:hover  { background: #464646; }
         QPushButton:pressed { background: #2e2e2e; }
+        QPushButton:focus {
+            outline: none;
+            border-color: #5577bb;
+        }
+        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+            border-color: #5577bb;
+        }
         QTableWidget {
             background: #242424;
             gridline-color: #383838;
@@ -125,18 +132,31 @@ def main():
             letter-spacing: 1px;
         }
         QScrollBar:vertical {
-            background: #1c1c1c;
-            width: 10px;
+            background: transparent;
+            width: 8px;
             border: none;
         }
         QScrollBar::handle:vertical {
-            background: #505050;
+            background: #404040;
             border-radius: 4px;
-            min-height: 20px;
+            min-height: 24px;
         }
-        QScrollBar::handle:vertical:hover { background: #686868; }
+        QScrollBar::handle:vertical:hover { background: #585858; }
         QScrollBar::add-line:vertical,
         QScrollBar::sub-line:vertical { height: 0px; }
+        QScrollBar:horizontal {
+            background: transparent;
+            height: 8px;
+            border: none;
+        }
+        QScrollBar::handle:horizontal {
+            background: #404040;
+            border-radius: 4px;
+            min-width: 24px;
+        }
+        QScrollBar::handle:horizontal:hover { background: #585858; }
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal { width: 0px; }
         QDialog {
             background: #262626;
         }

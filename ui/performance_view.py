@@ -38,10 +38,10 @@ class _PerfVUMeter(QWidget):
 
     def paintEvent(self, _):
         p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
         bw = (W - (self.BARS - 1) * 2) // self.BARS
-        # Map -60..0 dBFS onto 0..BARS so the rightmost bar lights only
-        # near clipping. Anything quieter than -60 dB is dark.
+        rad = 2.0
         norm = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
         lit = int(norm * self.BARS)
         for i in range(self.BARS):
@@ -52,7 +52,9 @@ class _PerfVUMeter(QWidget):
                 c = self._AMBER if i < lit else QColor(55, 40, 15)
             else:
                 c = self._GREEN if i < lit else QColor(25, 55, 35)
-            p.fillRect(x, 2, bw, H - 4, c)
+            p.setBrush(c)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(x, 2, bw, H - 4, rad, rad)
         p.end()
 
 
@@ -123,6 +125,10 @@ class PerformanceView(QWidget):
         self._signal_dot_lbl.setStyleSheet(
             f"color: {theme.SEMANTIC_DANGER}; font-size: 18px;"
         )
+        self._dot_pulse_dim = False
+        self._dot_pulse_timer = QTimer(self)
+        self._dot_pulse_timer.setInterval(800)
+        self._dot_pulse_timer.timeout.connect(self._pulse_dot)
         tb_lay.addStretch()
         tb_lay.addWidget(self._signal_dot_lbl, alignment=Qt.AlignmentFlag.AlignVCenter)
 
@@ -544,7 +550,24 @@ class PerformanceView(QWidget):
         self._signal_state_lbl.setText(state_text)
         self._signal_state_lbl.setStyleSheet(f"color: {state_color};")
         self._signal_level_lbl.setStyleSheet(f"color: {level_color};")
+        self._dot_color = dot_color
         self._signal_dot_lbl.setStyleSheet(f"color: {dot_color}; font-size: 18px;")
+        if signal_ok and not warning:
+            if not self._dot_pulse_timer.isActive():
+                self._dot_pulse_dim = False
+                self._dot_pulse_timer.start()
+        else:
+            self._dot_pulse_timer.stop()
+
+    def _pulse_dot(self):
+        self._dot_pulse_dim = not self._dot_pulse_dim
+        alpha = "0.4" if self._dot_pulse_dim else "1.0"
+        c = self._dot_color
+        h = c.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        self._signal_dot_lbl.setStyleSheet(
+            f"color: rgba({r},{g},{b},{alpha}); font-size: 18px;"
+        )
 
     def set_cues(self, cues: List):
         self._cues = list(cues)

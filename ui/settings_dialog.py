@@ -69,6 +69,7 @@ def _primary_btn_qss() -> str:
         f"border: none; border-radius: {theme.RADIUS_MD}px; "
         f"padding: 8px 18px; }}"
         f"QPushButton:hover {{ background: {theme.ACTION_PRIMARY_HOVER}; }}"
+        f"QPushButton:pressed {{ background: #28A85E; }}"
     )
 
 
@@ -81,6 +82,7 @@ def _secondary_btn_qss() -> str:
         f"padding: 6px 14px; }}"
         f"QPushButton:hover {{ background: #2e2e2e; "
         f"border-color: {theme.BORDER_STRONG}; }}"
+        f"QPushButton:pressed {{ background: #1a1a1a; }}"
     )
 
 
@@ -92,6 +94,7 @@ def _ghost_icon_btn_qss() -> str:
         f"padding: 0; }}"
         f"QPushButton:hover {{ background: {theme.BG_RAISED}; "
         f"border-color: {theme.BORDER_STRONG}; }}"
+        f"QPushButton:pressed {{ background: {theme.BG_SURFACE}; }}"
     )
 
 
@@ -108,9 +111,14 @@ class _OperatorRow(QWidget):
         super().__init__(parent)
         self._color = color
         self._on_delete = on_delete
+        self.setStyleSheet(
+            f"_OperatorRow {{ border-radius: {theme.RADIUS_SM}px; "
+            f"padding: 2px 4px; }}"
+            f"_OperatorRow:hover {{ background: {theme.BG_RAISED}; }}"
+        )
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(8)
 
         # The line edit has to exist before _refresh_swatch can ask
