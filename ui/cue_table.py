@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QRect
 from PyQt6.QtGui import QColor, QFont, QBrush, QPainter, QPixmap, QIcon
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect
 
 from cue_engine import Cue, find_duplicate_rows
 from ui.fonts import mono_font
@@ -177,6 +178,11 @@ class TimecodePopup(QFrame):
             "TimecodePopup { background: #1c1c1c; border: 2px solid #4a90d9; border-radius: 6px; }"
         )
         self.setFixedSize(220, 70)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        self.setGraphicsEffect(shadow)
         self._applied = False
         self._cancelled = False
 

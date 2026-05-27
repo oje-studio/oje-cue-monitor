@@ -3,7 +3,7 @@ set -e
 
 echo ""
 echo "╔══════════════════════════════════════╗"
-echo "║     ØJE CUE MONITOR  v1.0beta        ║"
+echo "║     ØJE CUE MONITOR  v1.1beta        ║"
 echo "║     Setup for macOS                  ║"
 echo "║     © 2026 ØJE Studio               ║"
 echo "╚══════════════════════════════════════╝"
