@@ -17,8 +17,24 @@ permissions:
   contents: write   # needed by the release job to publish assets
 
 jobs:
+  # Pure-logic tests (cue engine, show file) gate the binary builds —
+  # no Qt/audio needed, so this runs on a bare ubuntu runner in seconds.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run pytest
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest tests/ -q
+
   windows:
     name: Windows x64
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +61,7 @@ jobs:
 
   macos:
     name: macOS (Apple Silicon)
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

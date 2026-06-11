@@ -9,9 +9,11 @@ Live show operator tool — LTC/SMPTE timecode reader + cue list manager with pe
 Pre-built binaries for macOS and Windows: **[GitHub Releases](https://github.com/oje-studio/oje-cue-monitor/releases)**.
 No Python install required — just download, unzip (macOS) or run (Windows).
 
-![Version](https://img.shields.io/badge/version-1.1beta-blue)
+![Release](https://img.shields.io/github/v/release/oje-studio/oje-cue-monitor?include_prereleases&label=release)
+![Build](https://img.shields.io/github/actions/workflow/status/oje-studio/oje-cue-monitor/build.yml?branch=main)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.9+-green)
+![License](https://img.shields.io/github/license/oje-studio/oje-cue-monitor)
 
 ## Features
 
