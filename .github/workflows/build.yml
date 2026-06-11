@@ -53,7 +53,7 @@ jobs:
         run: python -m PyInstaller OJECueMonitor_win.spec --noconfirm
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: OJE-CUE-MONITOR-Windows
           path: "dist/OJE CUE MONITOR.exe"
@@ -90,7 +90,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "ØJE CUE MONITOR.app" "OJE-CUE-MONITOR-macOS.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: OJE-CUE-MONITOR-macOS
           path: "dist/OJE-CUE-MONITOR-macOS.zip"
