@@ -103,13 +103,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: OJE-CUE-MONITOR-Windows
           path: windows
 
       - name: Download macOS artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: OJE-CUE-MONITOR-macOS
           path: macos
