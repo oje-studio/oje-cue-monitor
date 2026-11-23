@@ -38,10 +38,10 @@ class _PerfVUMeter(QWidget):
 
     def paintEvent(self, _):
         p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
         bw = (W - (self.BARS - 1) * 2) // self.BARS
-        # Map -60..0 dBFS onto 0..BARS so the rightmost bar lights only
-        # near clipping. Anything quieter than -60 dB is dark.
+        rad = 2.0
         norm = max(0.0, min(1.0, (self._db + 60.0) / 60.0))
         lit = int(norm * self.BARS)
         for i in range(self.BARS):
@@ -52,7 +52,9 @@ class _PerfVUMeter(QWidget):
                 c = self._AMBER if i < lit else QColor(55, 40, 15)
             else:
                 c = self._GREEN if i < lit else QColor(25, 55, 35)
-            p.fillRect(x, 2, bw, H - 4, c)
+            p.setBrush(c)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(x, 2, bw, H - 4, rad, rad)
         p.end()
 
 

@@ -421,7 +421,7 @@ body {{
 .vu .bar {{
     width: 10px;
     height: 100%;
-    border-radius: 1px;
+    border-radius: 2px;
     background: rgba(54, 179, 126, 0.12);   /* dim success */
 }}
 .vu .bar:nth-child(4) {{ background: rgba(245, 165, 36, 0.12); }}  /* dim warning */
@@ -743,14 +743,20 @@ body {{
     background: var(--bg-raised);
     -webkit-appearance: none;
     appearance: none;
+    transition: background 0.15s ease, border-color 0.15s ease,
+                transform 0.1s ease;
+}}
+.ghost-btn:active {{
+    transform: scale(0.97);
 }}
 .primary-btn {{
     background: var(--action);
     border-color: var(--action);
-    color: #0a1a10;  /* dark green-ink for contrast on bright green */
+    color: #0a1a10;
 }}
 .primary-btn:active {{
     background: var(--action-hover);
+    transform: scale(0.97);
 }}
 .error {{
     color: var(--danger);
@@ -772,7 +778,8 @@ body {{
 .access-pill {{ display: none; }}
 .connection-lost {{
     position: fixed;
-    top: env(safe-area-inset-top, 0px); left: 0; right: 0;
+    left: 0; right: 0;
+    top: env(safe-area-inset-top, 0px);
     background: var(--danger);
     color: var(--text-bright);
     text-align: center;
@@ -781,6 +788,13 @@ body {{
     font-weight: 600;
     letter-spacing: 1px;
     z-index: 999;
+    transform: translateY(-100%);
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}}
+.connection-lost.visible {{
+    transform: translateY(0);
+    opacity: 1;
 }}
 /* Phone-specific tweaks. The base layout is already mobile-first via
    clamp() and grid auto-fit, this just trims spacing on small screens. */
@@ -820,7 +834,7 @@ body {{
 </style>
 </head>
 <body>
-<div id="conn-banner" class="connection-lost hidden">CONNECTION LOST — RECONNECTING...</div>
+<div id="conn-banner" class="connection-lost">CONNECTION LOST — RECONNECTING...</div>
 <div id="auth-overlay" class="overlay hidden">
     <form class="auth-card" id="auth-form">
         <div class="auth-title">Remote Access</div>
@@ -940,7 +954,7 @@ function connect() {{
     ws.onopen = () => {{
         clearTimeout(wsOpenWatchdog);
         stopPolling();
-        document.getElementById('conn-banner').classList.add('hidden');
+        document.getElementById('conn-banner').classList.remove('visible');
         // One more belt-and-suspenders fetch on open — covers the case
         // where the server-pushed initial frame raced past Safari's
         // onmessage assignment.
@@ -953,7 +967,7 @@ function connect() {{
 
     ws.onclose = () => {{
         clearTimeout(wsOpenWatchdog);
-        document.getElementById('conn-banner').classList.remove('hidden');
+        document.getElementById('conn-banner').classList.add('visible');
         startPolling();   // keep state flowing while we wait to reconnect
         reconnectTimer = setTimeout(connect, 2000);
     }};
