@@ -79,6 +79,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "PyQt6<6.11" pyaudio numpy "qrcode[pil]" aiohttp Pillow pyinstaller
 
+      - name: Compile accessibility fix shim (QTBUG-149612)
+        run: clang -dynamiclib -fno-objc-arc -framework Foundation -o liboje_axfix.dylib axfix.m
+
       - name: Build .app
         run: python -m PyInstaller OJECueMonitor.spec --noconfirm
 
