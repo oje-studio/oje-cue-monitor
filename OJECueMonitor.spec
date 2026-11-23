@@ -21,6 +21,10 @@ if ltc:
 if portaudio:
     binaries.append(portaudio)
 
+# Accessibility crash fix shim (QTBUG-149612) — compiled by build.sh / CI.
+if os.path.exists("liboje_axfix.dylib"):
+    binaries.append(("liboje_axfix.dylib", "."))
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 a = Analysis(
     ["main.py"],
@@ -98,12 +102,12 @@ app = BUNDLE(
     name="ØJE CUE MONITOR.app",
     icon=os.path.join("assets", "icon.icns"),
     bundle_identifier="studio.oje.cuemonitor",
-    version="1.2.0",
+    version="1.2.1",
     info_plist={
         "CFBundleDisplayName":          "ØJE CUE MONITOR",
         "CFBundleName":                 "ØJE CUE MONITOR",
         "CFBundleShortVersionString":   "1.2",
-        "CFBundleVersion":              "1.2.0",
+        "CFBundleVersion":              "1.2.1",
         "NSHumanReadableCopyright":     "© 2026 ØJE Studio · oje.studio · hello@oje.studio",
         "NSMicrophoneUsageDescription": "ØJE CUE MONITOR needs microphone access to receive LTC timecode from the audio input.",
         "NSHighResolutionCapable":      True,

@@ -22,6 +22,10 @@ fi
 echo "▶  Cleaning previous build..."
 rm -rf build dist
 
+# ── Accessibility crash fix shim (QTBUG-149612) ──────────────────────────────
+echo "▶  Compiling accessibility fix shim..."
+clang -dynamiclib -fno-objc-arc -framework Foundation -o liboje_axfix.dylib axfix.m
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "▶  Building .app bundle..."

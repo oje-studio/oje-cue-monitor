@@ -45,7 +45,7 @@ if sys.stderr is not None:
 logging.basicConfig(level=logging.DEBUG, handlers=_handlers)
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "1.2beta"
+VERSION   = "1.2.1beta"
 COPYRIGHT = "© 2026 ØJE Studio"
 WEBSITE   = "oje.studio"
 EMAIL     = "hello@oje.studio"
@@ -57,10 +57,35 @@ def _resource_path(*parts: str) -> str:
     return os.path.join(base, *parts)
 
 
+def _install_macos_axfix() -> None:
+    """QTBUG-149612: Qt's cocoa accessibility elements delete interfaces the
+    table still references; any external accessibility client (VoiceOver,
+    AI computer-use services) then reads freed memory and the app segfaults.
+    The bundled Qt predates the upstream fix, so axfix.m replicates it by
+    swizzling at runtime. Must run after QApplication exists (the cocoa
+    platform plugin registers the class). Remove with axfix.m once bundled
+    Qt is >= 6.12.1."""
+    if platform.system() != "Darwin":
+        return
+    log = logging.getLogger("axfix")
+    path = _resource_path("liboje_axfix.dylib")
+    if not os.path.exists(path):
+        log.info("shim not bundled; accessibility crash fix inactive")
+        return
+    try:
+        import ctypes
+        rc = ctypes.CDLL(path).oje_axfix_install()
+    except OSError as exc:
+        log.warning("could not load shim: %s", exc)
+        return
+    log.info("installed, rc=%d (0=patched, 4=Qt already fixed)", rc)
+
+
 def main():
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
+    _install_macos_axfix()
     app.setApplicationName("OJE Cue Monitor")
     app.setApplicationVersion(VERSION)
     app.setOrganizationName("OJE Studio")
