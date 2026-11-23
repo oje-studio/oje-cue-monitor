@@ -45,7 +45,7 @@ if sys.stderr is not None:
 logging.basicConfig(level=logging.DEBUG, handlers=_handlers)
 
 APP_NAME  = "ØJE CUE MONITOR"
-VERSION   = "1.1beta"
+VERSION   = "1.2beta"
 COPYRIGHT = "© 2026 ØJE Studio"
 WEBSITE   = "oje.studio"
 EMAIL     = "hello@oje.studio"
